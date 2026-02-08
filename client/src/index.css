@@ -1,0 +1,316 @@
+/* ═══════════════════════════════════════════════════════════════
+   PG FILMMAKER - Global Styles
+   ═══════════════════════════════════════════════════════════════ */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─────────────────────────────────────────────────────────────────
+   CSS Variables
+   ───────────────────────────────────────────────────────────────── */
+
+:root {
+  /* Colors */
+  --color-primary: #d946ef;
+  --color-primary-dark: #a21caf;
+  --color-background: #020617;
+  --color-surface: #0f172a;
+  --color-text: #f8fafc;
+  --color-text-muted: #94a3b8;
+  --color-accent-gold: #fbbf24;
+  --color-accent-rose: #f43f5e;
+  
+  /* Transitions */
+  --transition-fast: 150ms ease;
+  --transition-normal: 300ms ease;
+  --transition-slow: 500ms ease;
+  
+  /* Z-index layers */
+  --z-background: -1;
+  --z-default: 1;
+  --z-header: 100;
+  --z-modal: 200;
+  --z-chat: 300;
+  --z-toast: 400;
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   Base Styles
+   ───────────────────────────────────────────────────────────────── */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: 'Inter', system-ui, sans-serif;
+  background-color: var(--color-background);
+  color: var(--color-text);
+  line-height: 1.6;
+  overflow-x: hidden;
+}
+
+/* Smooth scroll with Lenis */
+html.lenis {
+  height: auto;
+}
+
+.lenis.lenis-smooth {
+  scroll-behavior: auto;
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   Typography
+   ───────────────────────────────────────────────────────────────── */
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Playfair Display', serif;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.heading-xl {
+  @apply text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-bold;
+}
+
+.heading-lg {
+  @apply text-3xl sm:text-4xl md:text-5xl font-bold;
+}
+
+.heading-md {
+  @apply text-2xl sm:text-3xl md:text-4xl font-semibold;
+}
+
+.heading-sm {
+  @apply text-xl sm:text-2xl font-semibold;
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   Utility Classes
+   ───────────────────────────────────────────────────────────────── */
+
+/* Glass effect */
+.glass {
+  background: rgba(15, 23, 42, 0.8);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(148, 163, 184, 0.1);
+}
+
+.glass-light {
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+/* Gradient text */
+.gradient-text {
+  background: linear-gradient(135deg, #d946ef 0%, #f43f5e 50%, #fbbf24 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Gradient border */
+.gradient-border {
+  position: relative;
+  background: var(--color-surface);
+  border-radius: 1rem;
+}
+
+.gradient-border::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  background: linear-gradient(135deg, #d946ef, #f43f5e, #fbbf24);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  padding: 1px;
+  pointer-events: none;
+}
+
+/* Glow effects */
+.glow-primary {
+  box-shadow: 0 0 30px rgba(217, 70, 239, 0.3);
+}
+
+.glow-primary-lg {
+  box-shadow: 0 0 60px rgba(217, 70, 239, 0.4);
+}
+
+/* Section padding */
+.section-padding {
+  @apply py-16 sm:py-20 md:py-24 lg:py-32;
+}
+
+.container-custom {
+  @apply max-w-7xl mx-auto px-4 sm:px-6 lg:px-8;
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   Buttons
+   ───────────────────────────────────────────────────────────────── */
+
+.btn {
+  @apply inline-flex items-center justify-center px-6 py-3 rounded-full font-medium transition-all duration-300;
+}
+
+.btn-primary {
+  @apply btn bg-gradient-to-r from-primary-500 to-accent-rose text-white;
+  @apply hover:shadow-lg hover:shadow-primary-500/30 hover:scale-105;
+  @apply active:scale-95;
+}
+
+.btn-secondary {
+  @apply btn border border-primary-500/50 text-primary-400;
+  @apply hover:bg-primary-500/10 hover:border-primary-500;
+}
+
+.btn-ghost {
+  @apply btn text-gray-300 hover:text-white hover:bg-white/5;
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   Scrollbar
+   ───────────────────────────────────────────────────────────────── */
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-background);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-primary-dark);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-primary);
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   Selection
+   ───────────────────────────────────────────────────────────────── */
+
+::selection {
+  background: rgba(217, 70, 239, 0.3);
+  color: white;
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   Focus States (Accessibility)
+   ───────────────────────────────────────────────────────────────── */
+
+:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   Performance: Reduced Motion
+   ───────────────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   Low-End Device Optimizations
+   ───────────────────────────────────────────────────────────────── */
+
+.perf-low .glass {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  background: rgba(15, 23, 42, 0.95);
+}
+
+.perf-low * {
+  animation-duration: 0ms !important;
+  transition-duration: 150ms !important;
+}
+
+.perf-low .gradient-border::before {
+  display: none;
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   Chat Widget Styles
+   ───────────────────────────────────────────────────────────────── */
+
+.chat-bubble {
+  @apply relative max-w-[80%] p-4 rounded-2xl;
+}
+
+.chat-bubble-user {
+  @apply bg-gradient-to-r from-primary-600 to-primary-500 text-white ml-auto;
+  border-bottom-right-radius: 4px;
+}
+
+.chat-bubble-bot {
+  @apply bg-dark-800 text-gray-100;
+  border-bottom-left-radius: 4px;
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   Loading Skeleton
+   ───────────────────────────────────────────────────────────────── */
+
+.skeleton {
+  @apply bg-gradient-to-r from-dark-800 via-dark-700 to-dark-800;
+  background-size: 200% 100%;
+  animation: skeleton-loading 1.5s ease-in-out infinite;
+}
+
+@keyframes skeleton-loading {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   Image Hover Effects
+   ───────────────────────────────────────────────────────────────── */
+
+.image-hover {
+  @apply relative overflow-hidden;
+}
+
+.image-hover img {
+  @apply transition-transform duration-500;
+}
+
+.image-hover:hover img {
+  @apply scale-110;
+}
+
+.image-hover::after {
+  content: '';
+  @apply absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent;
+  @apply opacity-0 transition-opacity duration-300;
+}
+
+.image-hover:hover::after {
+  @apply opacity-100;
+}
