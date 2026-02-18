@@ -11,9 +11,15 @@ const api = axios.create({
   baseURL: API_URL,
   timeout: 30000,
   headers: {
-    'Content-Type': 'application/json'
+    'Content-Type': 'application/json',
+    'Accept': 'application/json',
+    'X-Requested-With': 'XMLHttpRequest'
   }
 })
+
+// Debug: Log API configuration
+console.log('API URL:', API_URL)
+console.log('🔗 API Configuration:', { baseURL: API_URL })
 
 // Request interceptor - Add auth token
 api.interceptors.request.use(
@@ -33,6 +39,7 @@ api.interceptors.response.use(
   (error) => {
     if (error.response?.status === 401) {
       localStorage.removeItem('adminToken')
+      localStorage.removeItem('auth-storage') // Clear Zustand persist state
       window.location.href = '/admin'
     }
     return Promise.reject(error)
@@ -44,14 +51,29 @@ api.interceptors.response.use(
 // ═══════════════════════════════════════════════════════════════
 
 export const publicAPI = {
-  // Get packages
-  getPackages: () => api.get('/public/packages'),
-  
+  // Get packages (with cache-busting)
+  getPackages: () => api.get('/public/packages', {
+    params: {
+      _t: Date.now() // Cache-busting parameter
+    }
+  }),
+
   // Get portfolio/gallery
-  getPortfolio: () => api.get('/public/portfolio'),
-  
+  getPortfolio: () => api.get('/public/portfolio', {
+    params: {
+      _t: Date.now() // Cache-busting parameter
+    }
+  }),
+
   // Get filmmaker info
-  getInfo: () => api.get('/public/info')
+  getInfo: () => api.get('/public/info', {
+    params: {
+      _t: Date.now() // Cache-busting parameter
+    }
+  }),
+
+  // Submit booking (via contact form or chat)
+  submitBooking: (bookingData) => api.post('/chat/booking', bookingData)
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -60,20 +82,32 @@ export const publicAPI = {
 
 export const chatAPI = {
   // Send message
-  sendMessage: (sessionId, message, language = 'en') => 
+  sendMessage: (sessionId, message, language = 'en') =>
     api.post('/chat/message', { sessionId, message, language }),
-  
+
   // Get conversation
-  getConversation: (sessionId) => 
+  getConversation: (sessionId) =>
     api.get(`/chat/${sessionId}`),
-  
+
   // Submit booking
-  submitBooking: (sessionId, bookingData) => 
+  submitBooking: (sessionId, bookingData) =>
     api.post('/chat/booking', { sessionId, ...bookingData }),
-  
+
   // Send feedback
-  sendFeedback: (sessionId, rating, comment) => 
-    api.post('/chat/feedback', { sessionId, rating, comment })
+  sendFeedback: (sessionId, rating, comment) =>
+    api.post('/chat/feedback', { sessionId, rating, comment }),
+
+  // Create booking (for custom packages)
+  createBooking: (bookingData) =>
+    api.post('/chat/booking', bookingData),
+
+  // Check existing booking with device fingerprint
+  checkExistingBooking: (mobile, deviceFingerprint) =>
+    api.post('/chat/check-booking', { mobile, deviceFingerprint }),
+
+  // Update booking
+  updateBooking: (bookingId, updateData) =>
+    api.put(`/chat/booking/${bookingId}`, updateData)
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -84,160 +118,180 @@ export const adminAPI = {
   // ─────────────────────────────────────────────────────────────
   // Authentication
   // ─────────────────────────────────────────────────────────────
-  
-  login: (email, password) => 
+
+  login: (email, password) =>
     api.post('/admin/login', { email, password }),
-  
-  logout: () => 
+
+  logout: () =>
     api.post('/admin/logout'),
-  
-  verifyToken: () => 
+
+  verifyToken: () =>
     api.get('/admin/verify'),
-  
+
   // ─────────────────────────────────────────────────────────────
   // Dashboard
   // ─────────────────────────────────────────────────────────────
-  
-  getDashboard: () => 
+
+  getDashboard: () =>
     api.get('/admin/dashboard'),
-  
+
   // ─────────────────────────────────────────────────────────────
   // Conversations
   // ─────────────────────────────────────────────────────────────
-  
-  getConversations: (params = {}) => 
+
+  getConversations: (params = {}) =>
     api.get('/admin/conversations', { params }),
-  
-  getConversation: (id) => 
+
+  getConversation: (id) =>
     api.get(`/admin/conversations/${id}`),
-  
-  deleteConversation: (id, reason = 'unwanted') => 
+
+  deleteConversation: (id, reason = 'unwanted') =>
     api.delete(`/admin/conversations/${id}`, { data: { reason } }),
-  
-  bulkDeleteConversations: (ids, reason = 'unwanted') => 
+
+  bulkDeleteConversations: (ids, reason = 'unwanted') =>
     api.post('/admin/conversations/bulk-delete', { ids, reason }),
-  
+
   // ─────────────────────────────────────────────────────────────
   // Bookings
   // ─────────────────────────────────────────────────────────────
-  
-  getBookings: (params = {}) => 
+
+  getBookings: (params = {}) =>
     api.get('/admin/bookings', { params }),
-  
-  updateBooking: (id, data) => 
+
+  updateBooking: (id, data) =>
     api.put(`/admin/bookings/${id}`, data),
-  
-  deleteBooking: (id) => 
+
+  deleteBooking: (id) =>
     api.delete(`/admin/bookings/${id}`),
-  
+
   // ─────────────────────────────────────────────────────────────
   // Packages
   // ─────────────────────────────────────────────────────────────
-  
-  getAdminPackages: () => 
+
+  getAdminPackages: () =>
     api.get('/admin/packages'),
-  
-  createPackage: (data) => 
+
+  createPackage: (data) =>
     api.post('/admin/packages', data),
-  
-  updatePackage: (id, data) => 
+
+  updatePackage: (id, data) =>
     api.put(`/admin/packages/${id}`, data),
-  
-  deletePackage: (id) => 
+
+  deletePackage: (id) =>
     api.delete(`/admin/packages/${id}`),
-  
-  reorderPackages: (order) => 
+
+  reorderPackages: (order) =>
     api.put('/admin/packages/reorder', { order }),
-  
+
   // ─────────────────────────────────────────────────────────────
   // Learning/Patterns
   // ─────────────────────────────────────────────────────────────
-  
-  getPatterns: () => 
+
+  getPatterns: () =>
     api.get('/admin/patterns'),
-  
-  getPendingPatterns: () => 
+
+  getPendingPatterns: () =>
     api.get('/admin/patterns/pending'),
-  
-  approvePattern: (id, intent) => 
+
+  approvePattern: (id, intent) =>
     api.post(`/admin/patterns/approve/${id}`, { intent }),
-  
-  rejectPattern: (id) => 
+
+  rejectPattern: (id) =>
     api.post(`/admin/patterns/reject/${id}`),
-  
-  addKeyword: (intent, keyword, language) => 
+
+  addKeyword: (intent, keyword, language) =>
     api.post('/admin/patterns/keyword', { intent, keyword, language }),
-  
-  removeKeyword: (intent, keyword) => 
+
+  removeKeyword: (intent, keyword) =>
     api.delete(`/admin/patterns/keyword/${intent}/${keyword}`),
-  
+
   // ─────────────────────────────────────────────────────────────
   // Abuse Reports
   // ─────────────────────────────────────────────────────────────
-  
-  getAbuseReports: () => 
+
+  getAbuseReports: () =>
     api.get('/admin/abuse'),
-  
-  dismissAbuse: (id) => 
+
+  dismissAbuse: (id) =>
     api.post(`/admin/abuse/dismiss/${id}`),
-  
-  blockUser: (visitorId) => 
+
+  blockUser: (visitorId) =>
     api.post('/admin/abuse/block', { visitorId }),
-  
-  addAbuseWord: (word, severity) => 
+
+  addAbuseWord: (word, severity) =>
     api.post('/admin/abuse/word', { word, severity }),
-  
-  removeAbuseWord: (word) => 
+
+  removeAbuseWord: (word) =>
     api.delete(`/admin/abuse/word/${word}`),
-  
+
   // ─────────────────────────────────────────────────────────────
   // Trash
   // ─────────────────────────────────────────────────────────────
-  
-  getTrash: () => 
+
+  getTrash: () =>
     api.get('/admin/trash'),
-  
-  recoverFromTrash: (id) => 
+
+  recoverFromTrash: (id) =>
     api.post(`/admin/trash/recover/${id}`),
-  
-  permanentDelete: (id, otp) => 
+
+  permanentDelete: (id, otp) =>
     api.delete(`/admin/trash/${id}`, { data: { otp } }),
-  
-  emptyTrash: (otp) => 
+
+  emptyTrash: (otp) =>
     api.post('/admin/trash/empty', { otp }),
-  
+
   // ─────────────────────────────────────────────────────────────
   // Analytics
   // ─────────────────────────────────────────────────────────────
-  
-  getAnalytics: (params = {}) => 
+
+  getAnalytics: (params = {}) =>
     api.get('/admin/analytics', { params }),
-  
-  exportAnalytics: (params = {}) => 
+
+  exportAnalytics: (params = {}) =>
     api.get('/admin/analytics/export', { params, responseType: 'blob' }),
-  
+
   // ─────────────────────────────────────────────────────────────
   // Settings
   // ─────────────────────────────────────────────────────────────
-  
-  getSettings: () => 
+
+  getSettings: () =>
     api.get('/admin/settings'),
-  
-  updateSettings: (data) => 
+
+  updateSettings: (data) =>
     api.put('/admin/settings', data),
-  
-  changePassword: (currentPassword, newPassword, otp) => 
+
+  changePassword: (currentPassword, newPassword, otp) =>
     api.post('/admin/settings/password', { currentPassword, newPassword, otp }),
-  
+
   // ─────────────────────────────────────────────────────────────
   // OTP
   // ─────────────────────────────────────────────────────────────
-  
-  sendOTP: (action) => 
+
+  sendOTP: (action) =>
     api.post('/admin/otp/send', { action }),
-  
-  verifyOTP: (otp, action) => 
-    api.post('/admin/otp/verify', { otp, action })
+
+  verifyOTP: (otp, action) =>
+    api.post('/admin/otp/verify', { otp, action }),
+
+  // ─────────────────────────────────────────────────────────────
+  // UPLOADS
+  // ─────────────────────────────────────────────────────────────
+
+  uploadFile: (file) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return api.post('/admin/upload/file', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    })
+  },
+
+  uploadFiles: (files) => {
+    const formData = new FormData()
+    Array.from(files).forEach(file => formData.append('files', file))
+    return api.post('/admin/upload/files', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    })
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════

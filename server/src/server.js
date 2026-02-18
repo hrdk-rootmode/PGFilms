@@ -18,10 +18,16 @@ dotenv.config()
 import publicRoutes from './routes/public.routes.js'
 import chatRoutes from './routes/chat.routes.js'
 import adminRoutes from './routes/admin.routes.js'
+import uploadRoutes from './routes/upload.routes.js'
 
 // Import services for cron jobs
 import { runDailyCleanup, runAnalyticsAggregation } from './services/admin.service.js'
-import { runLearningJob } from './services/chat.service.js'
+import { 
+  processMessage, 
+  handleBooking, 
+  getConversation, 
+  runLearningJob 
+} from './services/chat.service.js'
 
 // Initialize Express app
 const app = express()
@@ -38,10 +44,32 @@ app.use(helmet({
 
 // CORS configuration
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true)
+    
+    const allowedOrigins = [
+      'http://localhost:3000', 
+      'http://localhost:3001', 
+      'http://localhost:5173',
+      'http://localhost:5000', // Add server's own origin
+      'http://127.0.0.1:3000',
+      'http://127.0.0.1:3001',
+      'http://127.0.0.1:5173',
+      'http://127.0.0.1:5000'
+    ]
+    
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true)
+    } else {
+      callback(new Error('Not allowed by CORS'))
+    }
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Client-Version'],
+  exposedHeaders: ['X-Total-Count'],
+  maxAge: 86400 // 24 hours
 }))
 
 // Request logging
@@ -55,13 +83,16 @@ if (process.env.NODE_ENV === 'development') {
 app.use(express.json({ limit: '10mb' }))
 app.use(express.urlencoded({ extended: true, limit: '10mb' }))
 
+// Static file serving for uploads
+app.use('/uploads', express.static('uploads'))
+
 // Rate limiting - General
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 100, // 100 requests per window
-  message: { 
-    success: false, 
-    message: 'Too many requests, please try again later.' 
+  message: {
+    success: false,
+    message: 'Too many requests, please try again later.'
   },
   standardHeaders: true,
   legacyHeaders: false
@@ -71,20 +102,22 @@ const generalLimiter = rateLimit({
 const chatLimiter = rateLimit({
   windowMs: 1 * 60 * 1000, // 1 minute
   max: 30, // 30 messages per minute
-  message: { 
-    success: false, 
-    message: 'Slow down! Too many messages.' 
+  message: {
+    success: false,
+    message: 'Slow down! Too many messages.'
   }
 })
 
-// Rate limiting - Admin (stricter)
+// Rate limiting - Admin (more lenient for dashboard)
 const adminLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 50,
-  message: { 
-    success: false, 
-    message: 'Too many admin requests.' 
-  }
+  max: 500, // Increased from 200 to 500 requests per 15 minutes for dashboard
+  message: {
+    success: false,
+    message: 'Too many admin requests, please try again later.'
+  },
+  standardHeaders: true,
+  legacyHeaders: false
 })
 
 // Apply rate limiters
@@ -98,8 +131,8 @@ app.use('/api/admin', adminLimiter)
 
 // Health check
 app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'ok', 
+  res.json({
+    status: 'ok',
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV
   })
@@ -109,6 +142,7 @@ app.get('/health', (req, res) => {
 app.use('/api/public', publicRoutes)
 app.use('/api/chat', chatRoutes)
 app.use('/api/admin', adminRoutes)
+app.use('/api/admin/upload', uploadRoutes)
 
 // Root route
 app.get('/', (req, res) => {
@@ -123,6 +157,143 @@ app.get('/', (req, res) => {
       admin: '/api/admin'
     }
   })
+})
+
+// Initialize packages endpoint (for development/testing)
+app.post('/api/init/packages', async (req, res) => {
+  try {
+    const { Config } = await import('./models/index.js')
+    
+    const packagesData = {
+      _id: 'packages',
+      type: 'packages',
+      data: [
+        {
+          id: 'pkg-portrait',
+          name: 'Portrait Session',
+          price: 25000,
+          emoji: '📷',
+          description: 'Professional portrait photography session',
+          duration: '1-2 hours',
+          features: [
+            'Professional studio setup',
+            'High-resolution digital images',
+            'Basic retouching included',
+            'Print-ready files'
+          ],
+          image: null,
+          popular: false,
+          isActive: true,
+          order: 1
+        },
+        {
+          id: 'pkg-wedding',
+          name: 'Wedding Package',
+          price: 75000,
+          emoji: '💒',
+          description: 'Complete wedding day coverage',
+          duration: 'Full day',
+          features: [
+            'Full day coverage',
+            'Professional editing',
+            'Prints included',
+            'Online gallery access'
+          ],
+          image: null,
+          popular: true,
+          isActive: true,
+          order: 2
+        },
+        {
+          id: 'pkg-prewedding',
+          name: 'Pre-Wedding Shoot',
+          price: 35000,
+          emoji: '💑',
+          description: 'Romantic pre-wedding photoshoot',
+          duration: '2-3 hours',
+          features: [
+            'Location scouting',
+            'Professional styling',
+            'Multiple outfit changes',
+            'Album design'
+          ],
+          image: null,
+          popular: false,
+          isActive: true,
+          order: 3
+        },
+        {
+          id: 'pkg-event',
+          name: 'Event Coverage',
+          price: 50000,
+          emoji: '🎉',
+          description: 'Corporate & personal event coverage',
+          duration: '4-6 hours',
+          features: [
+            'Event documentation',
+            'Candid moments',
+            'Group photos',
+            'Quick delivery'
+          ],
+          image: null,
+          popular: false,
+          isActive: true,
+          order: 4
+        },
+        {
+          id: 'pkg-maternity',
+          name: 'Maternity Shoot',
+          price: 20000,
+          emoji: '🤰',
+          description: 'Beautiful maternity photography',
+          duration: '1-2 hours',
+          features: [
+            'Studio or outdoor',
+            'Multiple poses',
+            'Family included',
+            'Digital delivery'
+          ],
+          image: null,
+          popular: false,
+          isActive: true,
+          order: 5
+        },
+        {
+          id: 'pkg-baby',
+          name: 'Baby Shoot',
+          price: 15000,
+          emoji: '👶',
+          description: 'Newborn & baby photography',
+          duration: '1-2 hours',
+          features: [
+            'Safe handling',
+            'Props included',
+            'Family photos',
+            'High-quality prints'
+          ],
+          image: null,
+          popular: false,
+          isActive: true,
+          order: 6
+        }
+      ]
+    }
+
+    const existingConfig = await Config.findOne({ _id: 'packages' })
+    
+    if (existingConfig) {
+      existingConfig.data = packagesData.data
+      await existingConfig.save()
+      res.json({ success: true, message: 'Packages updated successfully' })
+    } else {
+      const packagesConfig = new Config(packagesData)
+      await packagesConfig.save()
+      res.json({ success: true, message: 'Packages created successfully' })
+    }
+  } catch (error) {
+    console.error('❌ Init packages error:', error)
+    res.status(500).json({ success: false, message: 'Failed to initialize packages' })
+  }
 })
 
 // ═══════════════════════════════════════════════════════════════
@@ -179,10 +350,10 @@ const connectDB = async () => {
     })
 
     console.log(`✅ MongoDB Connected: ${conn.connection.host}`)
-    
+
     // Initialize default data if needed
     await initializeDefaultData()
-    
+
   } catch (error) {
     console.error('❌ MongoDB Connection Error:', error.message)
     process.exit(1)
@@ -193,17 +364,17 @@ const connectDB = async () => {
 const initializeDefaultData = async () => {
   try {
     const { Config } = await import('./models/index.js')
-    
+
     // Check if admin exists
     const adminExists = await Config.findOne({ _id: 'admin' })
-    
+
     if (!adminExists) {
       console.log('📦 Initializing default data...')
-      
+
       // Import and run seed function
       const { seedDatabase } = await import('./utils/helpers.js')
       await seedDatabase()
-      
+
       console.log('✅ Default data initialized')
     }
   } catch (error) {
@@ -262,10 +433,10 @@ const startServer = async () => {
   try {
     // Connect to database
     await connectDB()
-    
+
     // Setup cron jobs
     setupCronJobs()
-    
+
     // Start listening
     app.listen(PORT, () => {
       console.log(`

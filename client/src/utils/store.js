@@ -7,32 +7,32 @@ import { persist } from 'zustand/middleware'
 
 export const useAuthStore = create(
   persist(
-    (set, get) => ({
+    (set) => ({
       // State
       isAuthenticated: false,
       admin: null,
       token: null,
-      
+
       // Actions
       login: (admin, token) => {
         localStorage.setItem('adminToken', token)
         set({ isAuthenticated: true, admin, token })
       },
-      
+
       logout: () => {
         localStorage.removeItem('adminToken')
         set({ isAuthenticated: false, admin: null, token: null })
       },
-      
+
       updateAdmin: (data) => {
         set((state) => ({ admin: { ...state.admin, ...data } }))
       }
     }),
     {
       name: 'auth-storage',
-      partialize: (state) => ({ 
+      partialize: (state) => ({
         isAuthenticated: state.isAuthenticated,
-        admin: state.admin 
+        admin: state.admin
       })
     }
   )
@@ -42,50 +42,50 @@ export const useAuthStore = create(
 // CHAT STORE - Chat Widget State
 // ═══════════════════════════════════════════════════════════════
 
-export const useChatStore = create((set, get) => ({
+export const useChatStore = create((set) => ({
   // State
   isOpen: false,
   messages: [],
   sessionId: null,
   isTyping: false,
-  language: 'en',
+  connectionError: false,
   bookingFlow: null,
-  
+
   // Actions
   toggleChat: () => set((state) => ({ isOpen: !state.isOpen })),
-  
+
   openChat: () => set({ isOpen: true }),
-  
+
   closeChat: () => set({ isOpen: false }),
-  
+
   setSessionId: (sessionId) => set({ sessionId }),
-  
-  addMessage: (message) => set((state) => ({ 
-    messages: [...state.messages, { ...message, timestamp: new Date() }] 
+
+  addMessage: (message) => set((state) => ({
+    messages: [...state.messages, { ...message, timestamp: new Date() }]
   })),
-  
+
   setTyping: (isTyping) => set({ isTyping }),
-  
+
   setLanguage: (language) => set({ language }),
-  
-  startBookingFlow: (packageId) => set({ 
-    bookingFlow: { step: 1, packageId, data: {} } 
+
+  startBookingFlow: (packageId) => set({
+    bookingFlow: { step: 1, packageId, data: {} }
   }),
-  
+
   updateBookingFlow: (data) => set((state) => ({
-    bookingFlow: state.bookingFlow 
+    bookingFlow: state.bookingFlow
       ? { ...state.bookingFlow, data: { ...state.bookingFlow.data, ...data } }
       : null
   })),
-  
+
   nextBookingStep: () => set((state) => ({
-    bookingFlow: state.bookingFlow 
+    bookingFlow: state.bookingFlow
       ? { ...state.bookingFlow, step: state.bookingFlow.step + 1 }
       : null
   })),
-  
+
   endBookingFlow: () => set({ bookingFlow: null }),
-  
+
   clearChat: () => set({ messages: [], bookingFlow: null })
 }))
 
@@ -100,27 +100,27 @@ export const useUIStore = create((set) => ({
   isLoading: false,
   toast: null,
   modal: null,
-  
+
   // Actions
-  toggleMobileMenu: () => set((state) => ({ 
-    isMobileMenuOpen: !state.isMobileMenuOpen 
+  toggleMobileMenu: () => set((state) => ({
+    isMobileMenuOpen: !state.isMobileMenuOpen
   })),
-  
+
   closeMobileMenu: () => set({ isMobileMenuOpen: false }),
-  
+
   setActiveSection: (section) => set({ activeSection: section }),
-  
+
   setLoading: (isLoading) => set({ isLoading }),
-  
+
   showToast: (message, type = 'info', duration = 3000) => {
     set({ toast: { message, type, id: Date.now() } })
     setTimeout(() => set({ toast: null }), duration)
   },
-  
+
   hideToast: () => set({ toast: null }),
-  
+
   showModal: (modal) => set({ modal }),
-  
+
   hideModal: () => set({ modal: null })
 }))
 
@@ -128,7 +128,7 @@ export const useUIStore = create((set) => ({
 // ADMIN STORE - Admin Dashboard State
 // ═══════════════════════════════════════════════════════════════
 
-export const useAdminStore = create((set, get) => ({
+export const useAdminStore = create((set) => ({
   // State
   activeTab: 'dashboard',
   dashboardData: null,
@@ -140,41 +140,41 @@ export const useAdminStore = create((set, get) => ({
   trash: [],
   analytics: null,
   settings: null,
-  
+
   // Actions
   setActiveTab: (tab) => set({ activeTab: tab }),
-  
+
   setDashboardData: (data) => set({ dashboardData: data }),
-  
+
   setConversations: (conversations) => set({ conversations }),
-  
+
   addConversation: (conversation) => set((state) => ({
     conversations: [conversation, ...state.conversations]
   })),
-  
+
   removeConversation: (id) => set((state) => ({
     conversations: state.conversations.filter(c => c._id !== id)
   })),
-  
+
   setBookings: (bookings) => set({ bookings }),
-  
+
   updateBookingInList: (id, data) => set((state) => ({
     bookings: state.bookings.map(b => b._id === id ? { ...b, ...data } : b)
   })),
-  
+
   setPackages: (packages) => set({ packages }),
-  
+
   setPatterns: (patterns) => set({ patterns }),
-  
+
   setAbuseReports: (reports) => set({ abuseReports: reports }),
-  
+
   setTrash: (trash) => set({ trash }),
-  
+
   removeFromTrash: (id) => set((state) => ({
     trash: state.trash.filter(t => t._id !== id)
   })),
-  
+
   setAnalytics: (analytics) => set({ analytics }),
-  
+
   setSettings: (settings) => set({ settings })
 }))

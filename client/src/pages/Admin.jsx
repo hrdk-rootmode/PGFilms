@@ -1,16 +1,18 @@
 import React, { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useNavigate } from 'react-router-dom'
-import { 
-  Eye, 
-  EyeOff, 
-  LogIn, 
+import {
+  Eye,
+  EyeOff,
+  LogIn,
   AlertCircle,
   Loader2,
   ArrowLeft
 } from 'lucide-react'
+import { adminAPI } from '../utils/api'
 import { useAuthStore } from '../utils/store'
-import AdminPanel from '../components/AdminPanel'
+import ProfessionalAdminDashboard from '../components/ProfessionalAdminDashboard'
+import ErrorBoundary from '../components/ErrorBoundary'
 
 // ═══════════════════════════════════════════════════════════════
 // ADMIN LOGIN COMPONENT
@@ -24,33 +26,22 @@ const AdminLogin = ({ onLogin }) => {
   const [isLoading, setIsLoading] = useState(false)
   const navigate = useNavigate()
 
-  // Demo credentials (for development - remove in production)
-  const DEMO_EMAIL = 'admin@pgfilms.com'
-  const DEMO_PASSWORD = 'admin123'
-
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
     setIsLoading(true)
 
     try {
-      // Simulate API call delay
-      await new Promise(resolve => setTimeout(resolve, 1000))
+      const res = await adminAPI.login(email, password)
 
-      // For now, use demo credentials (will connect to backend later)
-      if (email === DEMO_EMAIL && password === DEMO_PASSWORD) {
-        const adminData = {
-          email: DEMO_EMAIL,
-          name: 'PG Films',
-          role: 'admin'
-        }
-        const token = 'demo-token-' + Date.now()
-        onLogin(adminData, token)
+      if (res.data.success) {
+        onLogin(res.data.data.admin, res.data.data.token)
       } else {
-        setError('Invalid email or password')
+        setError(res.data.message || 'Login failed')
       }
     } catch (err) {
-      setError('Login failed. Please try again.')
+      console.error('Login Error:', err)
+      setError(err.response?.data?.message || 'Invalid email or password')
     } finally {
       setIsLoading(false)
     }
@@ -60,7 +51,7 @@ const AdminLogin = ({ onLogin }) => {
     <div className="min-h-screen bg-dark-950 flex items-center justify-center p-4">
       {/* Background gradient */}
       <div className="absolute inset-0 bg-gradient-to-br from-primary-900/20 via-dark-950 to-accent-rose/10" />
-      
+
       {/* Login Card */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
@@ -233,8 +224,12 @@ const Admin = () => {
     return <AdminLogin onLogin={handleLogin} />
   }
 
-  // Show dashboard if authenticated
-  return <AdminPanel admin={admin} onLogout={handleLogout} />
+  // Show main admin panel if authenticated
+  return (
+    <ErrorBoundary>
+      <ProfessionalAdminDashboard />
+    </ErrorBoundary>
+  )
 }
 
 export default Admin

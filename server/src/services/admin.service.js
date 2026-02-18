@@ -3,12 +3,12 @@
 // ═══════════════════════════════════════════════════════════════
 
 import { Conversation, Analytics, Config, getTodayDateString } from '../models/index.js'
-import { 
-  hashPassword, 
-  verifyPassword, 
-  generateToken, 
+import {
+  hashPassword,
+  verifyPassword,
+  generateToken,
   generateOTP,
-  sendOTPEmail 
+  sendOTPEmail
 } from '../utils/helpers.js'
 
 // ═══════════════════════════════════════════════════════════════
@@ -18,7 +18,7 @@ import {
 export const authenticateAdmin = async (email, password) => {
   try {
     const adminConfig = await Config.findOne({ _id: 'admin' })
-    
+
     if (!adminConfig) {
       throw new Error('Admin not configured')
     }
@@ -32,15 +32,15 @@ export const authenticateAdmin = async (email, password) => {
 
     // Check password
     const isValid = await verifyPassword(password, admin.passwordHash)
-    
+
     if (!isValid) {
       // Increment failed attempts
       admin.security.failedAttempts = (admin.security.failedAttempts || 0) + 1
-      
+
       if (admin.security.failedAttempts >= 5) {
         admin.security.lockedUntil = new Date(Date.now() + 15 * 60 * 1000) // 15 min lockout
       }
-      
+
       await adminConfig.save()
       throw new Error('Invalid credentials')
     }
@@ -54,7 +54,7 @@ export const authenticateAdmin = async (email, password) => {
     admin.security.failedAttempts = 0
     admin.security.lockedUntil = null
     admin.security.lastLogin = new Date()
-    
+
     // Add to login history
     if (!admin.security.loginHistory) {
       admin.security.loginHistory = []
@@ -64,13 +64,13 @@ export const authenticateAdmin = async (email, password) => {
       success: true
     })
     admin.security.loginHistory = admin.security.loginHistory.slice(0, 10)
-    
+
     await adminConfig.save()
 
     // Generate token
-    const token = generateToken({ 
-      email: admin.email, 
-      role: 'admin' 
+    const token = generateToken({
+      email: admin.email,
+      role: 'admin'
     })
 
     return {
@@ -94,92 +94,105 @@ export const authenticateAdmin = async (email, password) => {
 export const getDashboardStats = async () => {
   try {
     const today = getTodayDateString()
-    const yesterday = new Date()
-    yesterday.setDate(yesterday.getDate() - 1)
-    const yesterdayStr = yesterday.toISOString().split('T')[0]
+    const todayStart = new Date(new Date().setHours(0, 0, 0, 0))
+    const todayEnd = new Date(new Date().setHours(23, 59, 59, 999))
 
-    // Get today's analytics
-    const todayAnalytics = await Analytics.findOne({ date: today }) || {}
-    const yesterdayAnalytics = await Analytics.findOne({ date: yesterdayStr }) || {}
-
-    // Calculate changes
-    const calcChange = (today, yesterday) => {
-      if (!yesterday || yesterday === 0) return today > 0 ? 100 : 0
-      return Math.round(((today - yesterday) / yesterday) * 100)
+    // Get today's analytics (create if doesn't exist)
+    let todayAnalytics = await Analytics.findOne({ date: today })
+    if (!todayAnalytics) {
+      todayAnalytics = await Analytics.create({ date: today })
     }
 
-    // Get recent bookings
-    const recentBookings = await Conversation.find({
-      'booking.hasBooking': true,
-      'deletion.isDeleted': false
+    // Count conversations
+    const totalConversations = await Conversation.countDocuments({
+      'deletion.isDeleted': { $ne: true }
     })
-      .sort({ 'booking.statusHistory.changedAt': -1 })
+
+    const newConversations = await Conversation.countDocuments({
+      'deletion.isDeleted': { $ne: true },
+      createdAt: { $gte: todayStart }
+    })
+
+    // Count bookings - FIXED: Use correct field name
+    const totalBookings = await Conversation.countDocuments({
+      'deletion.isDeleted': { $ne: true },
+      'booking.hasBooking': true
+    })
+
+    const pendingBookings = await Conversation.countDocuments({
+      'deletion.isDeleted': { $ne: true },
+      'booking.hasBooking': true,
+      'booking.status': 'pending'
+    })
+
+    const confirmedBookings = await Conversation.countDocuments({
+      'deletion.isDeleted': { $ne: true },
+      'booking.hasBooking': true,
+      'booking.status': 'confirmed'
+    })
+
+    // Calculate active users (unique visitors today)
+    const activeUsers = await Conversation.distinct('visitor.fingerprint', {
+      'deletion.isDeleted': { $ne: true },
+      'meta.lastActiveAt': { $gte: todayStart, $lte: todayEnd }
+    })
+
+    // Calculate today's conversations (conversations with activity today)
+    const todayConversations = await Conversation.countDocuments({
+      'deletion.isDeleted': { $ne: true },
+      'meta.lastActiveAt': { $gte: todayStart, $lte: todayEnd }
+    })
+
+    // Get recent conversations - FIXED: Proper sorting by last activity
+    const recentConversations = await Conversation
+      .find({ 'deletion.isDeleted': { $ne: true } })
+      .sort({ 
+        'meta.lastActiveAt': -1,
+        'lastMessageAt': -1,
+        'createdAt': -1
+      })
       .limit(5)
-      .select('visitor booking meta createdAt')
-
-    // Get pending patterns
-    const patternsConfig = await Config.findOne({ _id: 'patterns' })
-    const pendingPatterns = patternsConfig?.data?.pendingPatterns?.slice(0, 5) || []
-
-    // Get booking counts by status
-    const bookingCounts = await Conversation.aggregate([
-      { $match: { 'booking.hasBooking': true, 'deletion.isDeleted': false } },
-      { $group: { _id: '$booking.status', count: { $sum: 1 } } }
-    ])
-
-    const bookingsByStatus = {}
-    bookingCounts.forEach(b => { bookingsByStatus[b._id] = b.count })
+      .select('visitor messages lastMessageAt booking meta createdAt')
 
     return {
-      today: {
-        visitors: todayAnalytics.traffic?.uniqueVisitors || 0,
-        visitorsChange: calcChange(
-          todayAnalytics.traffic?.uniqueVisitors || 0,
-          yesterdayAnalytics.traffic?.uniqueVisitors || 0
-        ),
-        chats: todayAnalytics.chat?.conversationsStarted || 0,
-        chatsChange: calcChange(
-          todayAnalytics.chat?.conversationsStarted || 0,
-          yesterdayAnalytics.chat?.conversationsStarted || 0
-        ),
-        bookings: todayAnalytics.bookings?.inquiriesCompleted || 0,
-        bookingsChange: calcChange(
-          todayAnalytics.bookings?.inquiriesCompleted || 0,
-          yesterdayAnalytics.bookings?.inquiriesCompleted || 0
-        ),
-        revenue: todayAnalytics.bookings?.totalValue || 0,
-        revenueChange: calcChange(
-          todayAnalytics.bookings?.totalValue || 0,
-          yesterdayAnalytics.bookings?.totalValue || 0
-        )
+      stats: {
+        totalConversations,
+        newConversations,
+        totalBookings,
+        pendingBookings,
+        confirmedBookings,
+        activeUsers: activeUsers.length,
+        todayConversations,
+        todayMessages: todayAnalytics.chat?.totalMessages || 0
       },
-      recentBookings: recentBookings.map(b => ({
-        id: b._id,
-        name: b.visitor?.name || 'Unknown',
-        phone: b.visitor?.phone,
-        package: b.booking?.package,
-        date: b.booking?.eventDate,
-        location: b.booking?.eventLocation,
-        status: b.booking?.status,
-        value: b.booking?.estimatedValue,
-        createdAt: b.createdAt
-      })),
-      pendingPatterns: pendingPatterns.map(p => ({
-        id: p.id,
-        word: p.word,
-        occurrences: p.occurrences,
-        suggestedIntent: p.suggestedIntent
-      })),
-      bookingsByStatus,
-      chatStats: {
-        instant: todayAnalytics.chat?.responseBreakdown?.instant || 0,
-        pattern: todayAnalytics.chat?.responseBreakdown?.pattern || 0,
-        ai: todayAnalytics.chat?.responseBreakdown?.ai || 0
-      }
+      recentConversations: recentConversations.map(c => ({
+        id: c._id,
+        visitorName: c.visitor?.name || 'Anonymous',
+        lastMessage: c.messages[c.messages.length - 1]?.text?.substring(0, 50) || '',
+        lastMessageAt: c.meta?.lastActiveAt || c.lastMessageAt || c.createdAt,
+        messageCount: c.messages?.length || 0,
+        isBooking: c.booking?.hasBooking || false,
+        bookingStatus: c.booking?.status || null,
+        status: c.booking?.hasBooking ? 'booking' : (c.abuse?.hasAbuse ? 'spam' : 'inquiry'),
+        createdAt: c.createdAt
+      })).sort((a, b) => new Date(b.lastMessageAt) - new Date(a.lastMessageAt))
     }
   } catch (error) {
     console.error('Dashboard stats error:', error)
-    throw error
+    // Return default values instead of throwing
+    return {
+      stats: {
+        totalConversations: 0,
+        newConversations: 0,
+        totalBookings: 0,
+        pendingBookings: 0,
+        confirmedBookings: 0,
+        activeUsers: 0,
+        todayConversations: 0,
+        todayMessages: 0
+      },
+      recentConversations: []
+    }
   }
 }
 
@@ -200,7 +213,7 @@ export const getConversations = async (options = {}) => {
     } = options
 
     const query = {}
-    
+
     if (!includeDeleted) {
       query['deletion.isDeleted'] = false
     }
@@ -228,25 +241,31 @@ export const getConversations = async (options = {}) => {
     }
 
     const total = await Conversation.countDocuments(query)
-    
+
     const conversations = await Conversation.find(query)
-      .sort({ 'meta.lastActiveAt': -1 })
+      .sort({ 
+        'meta.lastActiveAt': -1,
+        'lastMessageAt': -1,
+        'createdAt': -1
+      })
       .skip((page - 1) * limit)
       .limit(limit)
-      .select('sessionId visitor booking abuse meta messages createdAt')
+      .select('sessionId visitor booking abuse meta messages createdAt lastMessageAt')
 
     return {
       conversations: conversations.map(c => ({
         id: c._id,
         sessionId: c.sessionId,
         visitor: c.visitor,
-        lastMessage: c.messages[c.messages.length - 1]?.text?.substring(0, 100),
+        lastMessage: c.messages[c.messages.length - 1]?.text?.substring(0, 100) || '',
         messageCount: c.messages.length,
         status: c.booking?.hasBooking ? 'booking' : c.abuse?.hasAbuse ? 'spam' : 'inquiry',
         language: c.visitor?.language,
         createdAt: c.createdAt,
-        lastActiveAt: c.meta?.lastActiveAt
-      })),
+        lastActiveAt: c.meta?.lastActiveAt || c.lastMessageAt || c.createdAt,
+        lastMessageAt: c.lastMessageAt || c.createdAt,
+        messages: c.messages || [] // Include full conversation history
+      })).sort((a, b) => new Date(b.lastActiveAt) - new Date(a.lastActiveAt)),
       pagination: {
         total,
         page,
@@ -263,7 +282,7 @@ export const getConversations = async (options = {}) => {
 export const deleteConversation = async (id, reason = 'unwanted') => {
   try {
     const conversation = await Conversation.findById(id)
-    
+
     if (!conversation) {
       throw new Error('Conversation not found')
     }
@@ -309,7 +328,7 @@ export const getBookings = async (options = {}) => {
     }
 
     const total = await Conversation.countDocuments(query)
-    
+
     const bookings = await Conversation.find(query)
       .sort({ createdAt: -1 })
       .skip((page - 1) * limit)
@@ -318,16 +337,16 @@ export const getBookings = async (options = {}) => {
     return {
       bookings: bookings.map(b => ({
         id: b._id,
-        name: b.visitor?.name,
-        email: b.visitor?.email,
-        phone: b.visitor?.phone,
-        package: b.booking?.package,
-        eventDate: b.booking?.eventDate,
-        location: b.booking?.eventLocation,
-        status: b.booking?.status,
-        value: b.booking?.estimatedValue,
-        specialRequests: b.booking?.specialRequests,
-        adminNotes: b.booking?.adminNotes,
+        name: b.visitor?.name || 'Unknown',
+        email: b.visitor?.email || 'No email',
+        phone: b.visitor?.phone || 'No phone',
+        package: b.booking?.package || 'No package',
+        eventDate: b.booking?.eventDate || null,
+        location: b.booking?.eventLocation || 'No location',
+        status: b.booking?.status || 'pending',
+        value: b.booking?.estimatedValue || 0,
+        specialRequests: b.booking?.specialRequests || '',
+        adminNotes: b.booking?.adminNotes || '',
         createdAt: b.createdAt
       })),
       pagination: {
@@ -346,13 +365,14 @@ export const getBookings = async (options = {}) => {
 export const updateBookingStatus = async (id, status, notes = null) => {
   try {
     const conversation = await Conversation.findById(id)
-    
+
     if (!conversation || !conversation.booking?.hasBooking) {
       throw new Error('Booking not found')
     }
 
+    const oldStatus = conversation.booking.status
     conversation.booking.status = status
-    
+
     if (notes) {
       conversation.booking.adminNotes = notes
     }
@@ -365,9 +385,40 @@ export const updateBookingStatus = async (id, status, notes = null) => {
 
     await conversation.save()
 
+    // Update analytics if status changed
+    if (oldStatus !== status) {
+      const today = getTodayDateString()
+      const todayAnalytics = await Analytics.findOne({ date: today }) || await Analytics.create({ date: today })
+
+      // Update booking counts
+      if (oldStatus === 'pending') todayAnalytics.bookings.pending -= 1
+      if (oldStatus === 'contacted') todayAnalytics.bookings.contacted -= 1
+      if (oldStatus === 'confirmed') todayAnalytics.bookings.confirmed -= 1
+      if (oldStatus === 'completed') todayAnalytics.bookings.completed -= 1
+      if (oldStatus === 'cancelled') todayAnalytics.bookings.cancelled -= 1
+
+      if (status === 'pending') todayAnalytics.bookings.pending += 1
+      if (status === 'contacted') todayAnalytics.bookings.contacted += 1
+      if (status === 'confirmed') todayAnalytics.bookings.confirmed += 1
+      if (status === 'completed') todayAnalytics.bookings.completed += 1
+      if (status === 'cancelled') todayAnalytics.bookings.cancelled += 1
+
+      await todayAnalytics.save()
+    }
+
     return { success: true, message: 'Booking updated' }
   } catch (error) {
     console.error('Update booking error:', error)
+    throw error
+  }
+}
+
+export const deleteBooking = async (id, reason = 'cancelled') => {
+  try {
+    // Re-use deleteConversation logic since bookings are conversations
+    return await deleteConversation(id, reason)
+  } catch (error) {
+    console.error('Delete booking error:', error)
     throw error
   }
 }
@@ -378,48 +429,106 @@ export const updateBookingStatus = async (id, status, notes = null) => {
 
 export const getPackages = async () => {
   try {
+    console.log('🔍 getPackages called...')
     const packagesConfig = await Config.findOne({ _id: 'packages' })
-    return packagesConfig?.data || []
+    console.log('📦 Found packages config:', packagesConfig ? 'Yes' : 'No')
+    
+    if (!packagesConfig) {
+      console.log('❌ No packages config found')
+      return []
+    }
+    
+    const packages = packagesConfig.data || []
+    console.log('📋 Packages count:', packages.length)
+    console.log('📋 First package:', packages.length > 0 ? `${packages[0].name} - ${packages[0].price}` : 'No packages')
+    
+    return packages
   } catch (error) {
-    console.error('Get packages error:', error)
+    console.error('❌ Get packages error:', error)
     throw error
   }
 }
 
 export const updatePackage = async (packageId, data) => {
   try {
-    const packagesConfig = await Config.findOne({ _id: 'packages' })
+    console.log('🔧 updatePackage called with:', { packageId, data })
     
-    if (!packagesConfig) {
-      throw new Error('Packages not configured')
-    }
-
-    const packages = packagesConfig.data || []
-    const index = packages.findIndex(p => p.id === packageId)
-    
-    if (index === -1) {
-      // Add new package
-      packages.push({
-        id: packageId || `pkg-${Date.now()}`,
+    // Handle creation (when packageId is null or undefined)
+    if (!packageId) {
+      console.log('➕ Creating new package')
+      const newPackage = {
+        id: `pkg-${Date.now()}`,
         ...data,
         createdAt: new Date(),
         updatedAt: new Date()
-      })
-    } else {
-      // Update existing
-      packages[index] = {
-        ...packages[index],
-        ...data,
-        updatedAt: new Date()
       }
+      
+      const result = await Config.findOneAndUpdate(
+        { _id: 'packages' },
+        { $push: { data: newPackage } },
+        { upsert: true, new: true }
+      )
+      
+      console.log('✅ New package created and saved to database')
+      console.log('📦 Database result:', result ? 'Success' : 'Failed')
+      return newPackage
     }
 
-    packagesConfig.data = packages
-    await packagesConfig.save()
-
-    return { success: true, packages }
+    // Handle update - use findOneAndUpdate for atomic operation
+    console.log('🔄 Updating package with ID:', packageId)
+    
+    const updateData = {
+      id: packageId, // Ensure the ID is preserved
+      ...data,
+      updatedAt: new Date()
+    }
+    
+    console.log('🔄 Update data to save:', JSON.stringify(updateData, null, 2))
+    
+    // Try to find by ID first, if that fails, try to find by name (for broken data)
+    let result = await Config.findOneAndUpdate(
+      { _id: 'packages', 'data.id': packageId },
+      { 
+        $set: { 
+          'data.$': updateData
+        }
+      },
+      { new: true }
+    )
+    
+    // If not found by ID, try to find by name (for fixing broken data)
+    if (!result && data.name) {
+      console.log('⚠️ Package not found by ID, trying by name...')
+      result = await Config.findOneAndUpdate(
+        { _id: 'packages', 'data.name': data.name },
+        { 
+          $set: { 
+            'data.$': updateData
+          }
+        },
+        { new: true }
+      )
+    }
+    
+    console.log('📝 Database update result:', result ? 'Success' : 'Failed')
+    
+    if (!result) {
+      throw new Error(`Package with ID ${packageId} not found`)
+    }
+    
+    // Find the updated package in the returned data
+    const updatedPackage = result.data.find(p => p.id === packageId)
+    console.log('✅ Package updated in database:', JSON.stringify(updatedPackage, null, 2))
+    
+    // If for some reason the package is not found, return the updateData
+    if (!updatedPackage) {
+      console.log('⚠️ Updated package not found in result, returning updateData')
+      return { ...updateData, id: packageId }
+    }
+    
+    return updatedPackage
   } catch (error) {
-    console.error('Update package error:', error)
+    console.error('❌ Update package error:', error)
     throw error
   }
 }
@@ -427,7 +536,7 @@ export const updatePackage = async (packageId, data) => {
 export const deletePackage = async (packageId) => {
   try {
     const packagesConfig = await Config.findOne({ _id: 'packages' })
-    
+
     if (!packagesConfig) {
       throw new Error('Packages not configured')
     }
@@ -459,14 +568,14 @@ export const getPatterns = async () => {
 export const approvePattern = async (patternId, intent) => {
   try {
     const patternsConfig = await Config.findOne({ _id: 'patterns' })
-    
+
     if (!patternsConfig) {
       throw new Error('Patterns not configured')
     }
 
     const pendingPatterns = patternsConfig.data.pendingPatterns || []
     const pattern = pendingPatterns.find(p => p.id === patternId)
-    
+
     if (!pattern) {
       throw new Error('Pattern not found')
     }
@@ -497,7 +606,7 @@ export const approvePattern = async (patternId, intent) => {
 export const rejectPattern = async (patternId) => {
   try {
     const patternsConfig = await Config.findOne({ _id: 'patterns' })
-    
+
     if (!patternsConfig) {
       throw new Error('Patterns not configured')
     }
@@ -541,7 +650,7 @@ export const getTrash = async () => {
 export const recoverFromTrash = async (id) => {
   try {
     const conversation = await Conversation.findById(id)
-    
+
     if (!conversation) {
       throw new Error('Item not found')
     }
@@ -576,7 +685,7 @@ export const permanentDelete = async (id) => {
 export const getAnalytics = async (options = {}) => {
   try {
     const { range = 'week' } = options
-    
+
     let days = 7
     if (range === 'month') days = 30
     if (range === 'year') days = 365
@@ -629,7 +738,7 @@ export const getAnalytics = async (options = {}) => {
 export const sendAdminOTP = async (action) => {
   try {
     const adminConfig = await Config.findOne({ _id: 'admin' })
-    
+
     if (!adminConfig) {
       throw new Error('Admin not configured')
     }
@@ -659,7 +768,7 @@ export const sendAdminOTP = async (action) => {
 export const verifyAdminOTP = async (otp) => {
   try {
     const adminConfig = await Config.findOne({ _id: 'admin' })
-    
+
     if (!adminConfig?.data?.otp) {
       throw new Error('No OTP requested')
     }
@@ -678,7 +787,7 @@ export const verifyAdminOTP = async (otp) => {
 
     // Verify OTP
     const isValid = await verifyPassword(otp, otpData.lastCode)
-    
+
     if (!isValid) {
       adminConfig.data.otp.attempts += 1
       await adminConfig.save()
@@ -703,7 +812,7 @@ export const verifyAdminOTP = async (otp) => {
 export const getSettings = async () => {
   try {
     const adminConfig = await Config.findOne({ _id: 'admin' })
-    
+
     if (!adminConfig) {
       throw new Error('Admin not configured')
     }
@@ -720,7 +829,7 @@ export const getSettings = async () => {
 export const updateSettings = async (settings) => {
   try {
     const adminConfig = await Config.findOne({ _id: 'admin' })
-    
+
     if (!adminConfig) {
       throw new Error('Admin not configured')
     }
@@ -748,14 +857,14 @@ export const updateSettings = async (settings) => {
 export const changePassword = async (currentPassword, newPassword) => {
   try {
     const adminConfig = await Config.findOne({ _id: 'admin' })
-    
+
     if (!adminConfig) {
       throw new Error('Admin not configured')
     }
 
     // Verify current password
     const isValid = await verifyPassword(currentPassword, adminConfig.data.passwordHash)
-    
+
     if (!isValid) {
       throw new Error('Current password is incorrect')
     }
@@ -823,9 +932,9 @@ export const runAnalyticsAggregation = async () => {
   try {
     // This runs hourly to ensure analytics are up to date
     // Most analytics are incremented in real-time, but this catches any gaps
-    
+
     const today = getTodayDateString()
-    
+
     // Ensure today's analytics document exists
     await Analytics.findOneAndUpdate(
       { date: today },
@@ -836,6 +945,87 @@ export const runAnalyticsAggregation = async () => {
     return { success: true }
   } catch (error) {
     console.error('Analytics aggregation error:', error)
+    throw error
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// REAL-TIME DASHBOARD UPDATES
+// ═══════════════════════════════════════════════════════════════
+
+export const refreshDashboardStats = async () => {
+  try {
+    const today = getTodayDateString()
+    const todayStart = new Date(new Date().setHours(0, 0, 0, 0))
+    const todayEnd = new Date(new Date().setHours(23, 59, 59, 999))
+
+    // Get today's analytics (create if doesn't exist)
+    let todayAnalytics = await Analytics.findOne({ date: today })
+    if (!todayAnalytics) {
+      todayAnalytics = await Analytics.create({ date: today })
+    }
+
+    // Recalculate all stats
+    const totalConversations = await Conversation.countDocuments({
+      'deletion.isDeleted': { $ne: true }
+    })
+
+    const newConversations = await Conversation.countDocuments({
+      'deletion.isDeleted': { $ne: true },
+      createdAt: { $gte: todayStart }
+    })
+
+    const totalBookings = await Conversation.countDocuments({
+      'deletion.isDeleted': { $ne: true },
+      'booking.hasBooking': true
+    })
+
+    const pendingBookings = await Conversation.countDocuments({
+      'deletion.isDeleted': { $ne: true },
+      'booking.hasBooking': true,
+      'booking.status': 'pending'
+    })
+
+    const confirmedBookings = await Conversation.countDocuments({
+      'deletion.isDeleted': { $ne: true },
+      'booking.hasBooking': true,
+      'booking.status': 'confirmed'
+    })
+
+    // Calculate active users (unique visitors today)
+    const activeUsers = await Conversation.distinct('visitor.fingerprint', {
+      'deletion.isDeleted': { $ne: true },
+      'meta.lastActiveAt': { $gte: todayStart, $lte: todayEnd }
+    })
+
+    // Calculate today's conversations (conversations with activity today)
+    const todayConversations = await Conversation.countDocuments({
+      'deletion.isDeleted': { $ne: true },
+      'meta.lastActiveAt': { $gte: todayStart, $lte: todayEnd }
+    })
+
+    // Update analytics with current counts
+    todayAnalytics.bookings.total = totalBookings
+    todayAnalytics.bookings.pending = pendingBookings
+    todayAnalytics.bookings.confirmed = confirmedBookings
+    todayAnalytics.newConversations = newConversations
+
+    await todayAnalytics.save()
+
+    return {
+      stats: {
+        totalConversations,
+        newConversations,
+        totalBookings,
+        pendingBookings,
+        confirmedBookings,
+        activeUsers: activeUsers.length,
+        todayConversations,
+        todayMessages: todayAnalytics.chat?.totalMessages || 0
+      }
+    }
+  } catch (error) {
+    console.error('Refresh dashboard stats error:', error)
     throw error
   }
 }
@@ -867,5 +1057,6 @@ export default {
   updateSettings,
   changePassword,
   runDailyCleanup,
-  runAnalyticsAggregation
+  runAnalyticsAggregation,
+  refreshDashboardStats
 }

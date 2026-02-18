@@ -74,7 +74,7 @@ export const sendEmail = async ({ to, subject, html, text }) => {
     }
 
     const transporter = createTransporter()
-    
+
     const mailOptions = {
       from: `"${process.env.FILMMAKER_NAME || 'PG Films'}" <${process.env.SMTP_USER}>`,
       to,
@@ -94,7 +94,7 @@ export const sendEmail = async ({ to, subject, html, text }) => {
 
 export const sendOTPEmail = async (email, otp, action) => {
   const subject = `🔐 ${process.env.FILMMAKER_NAME || 'PG Films'} - Security Code`
-  
+
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 20px;">
       <h2 style="color: #d946ef;">Security Verification</h2>
@@ -109,14 +109,16 @@ export const sendOTPEmail = async (email, otp, action) => {
       </p>
     </div>
   `
-  
+
   return sendEmail({ to: email, subject, html })
 }
 
 export const sendBookingNotification = async (bookingData) => {
-  const adminEmail = process.env.FILMMAKER_EMAIL || process.env.ADMIN_EMAIL
-  const subject = `🔔 New Booking Request - ${bookingData.name}`
-  
+  const adminEmail = process.env.ADMIN_EMAIL || 'admin@example.com'
+  const filmmakerPhone = process.env.FILMMAKER_PHONE || '+91 98765 43210'
+
+  const subject = `📸 New Booking Request from ${bookingData.name}`
+
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
       <h2 style="color: #d946ef;">📸 New Booking Request!</h2>
@@ -141,7 +143,7 @@ export const sendBookingNotification = async (bookingData) => {
       ` : ''}
       
       <div style="margin-top: 20px;">
-        <a href="https://wa.me/91${bookingData.phone}" style="display: inline-block; padding: 12px 24px; background: #22c55e; color: white; text-decoration: none; border-radius: 8px; margin-right: 10px;">
+        <a href="https://wa.me/91${bookingData.phone.replace(/\D/g, '')}" style="display: inline-block; padding: 12px 24px; background: #22c55e; color: white; text-decoration: none; border-radius: 8px; margin-right: 10px;">
           💬 WhatsApp Client
         </a>
         <a href="tel:+91${bookingData.phone}" style="display: inline-block; padding: 12px 24px; background: #3b82f6; color: white; text-decoration: none; border-radius: 8px;">
@@ -150,12 +152,72 @@ export const sendBookingNotification = async (bookingData) => {
       </div>
       
       <p style="color: #888; font-size: 12px; margin-top: 30px;">
-        This booking was received via your website chat. Please respond within 2 hours.
+        This booking was received via your website chat. Please respond within 24 hours.
       </p>
     </div>
   `
-  
-  return sendEmail({ to: adminEmail, subject, html })
+
+  // Send confirmation to both admin and client
+  await Promise.all([
+    sendEmail({ to: adminEmail, subject, html }),
+    bookingData.email ? sendBookingConfirmationToClient(bookingData) : Promise.resolve()
+  ])
+}
+
+// Send booking confirmation to client
+export const sendBookingConfirmationToClient = async (bookingData) => {
+  const filmmakerName = process.env.FILMMAKER_NAME || 'PG Films'
+  const filmmakerPhone = process.env.FILMMAKER_PHONE || '+91 98765 43210'
+  const filmmakerEmail = process.env.FILMMAKER_EMAIL || 'pgfilms@gmail.com'
+
+  const subject = `📸 Booking Confirmation - ${filmmakerName}`
+
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+      <h2 style="color: #d946ef;">📸 Thank You for Your Booking!</h2>
+      
+      <p style="color: #333; line-height: 1.6;">
+        Hi <strong>${bookingData.name}</strong>,
+      </p>
+      
+      <p style="color: #333; line-height: 1.6;">
+        Thank you for choosing <strong>${filmmakerName}</strong>! We've received your booking request and are excited to be part of your special day.
+      </p>
+      
+      <div style="background: #f8fafc; padding: 20px; border-radius: 10px; margin: 20px 0; border-left: 4px solid #d946ef;">
+        <h3 style="margin-top: 0; color: #1e293b;">Your Booking Details</h3>
+        <table style="width: 100%; color: #475569;">
+          <tr><td style="padding: 5px 0;"><strong>Package:</strong></td><td>${bookingData.package}</td></tr>
+          <tr><td style="padding: 5px 0;"><strong>Event Date:</strong></td><td>${bookingData.eventDate}</td></tr>
+          <tr><td style="padding: 5px 0;"><strong>Location:</strong></td><td>${bookingData.location}</td></tr>
+          <tr><td style="padding: 5px 0;"><strong>Contact:</strong></td><td>${bookingData.phone}</td></tr>
+        </table>
+      </div>
+      
+      <div style="background: #fef3c7; padding: 15px; border-radius: 10px; margin: 20px 0; border-left: 4px solid #f59e0b;">
+        <p style="margin: 0; color: #78350f;">
+          <strong>⏰ What's Next?</strong><br/>
+          We'll contact you within <strong>24 hours</strong> via WhatsApp or phone to confirm availability and discuss details.
+        </p>
+      </div>
+      
+      <div style="margin-top: 30px; text-align: center;">
+        <p style="color: #64748b; margin-bottom: 15px;">Have questions? Reach out to us:</p>
+        <a href="https://wa.me/91${filmmakerPhone.replace(/\D/g, '')}" style="display: inline-block; padding: 12px 30px; background: #22c55e; color: white; text-decoration: none; border-radius: 8px; margin: 0 5px;">
+          💬 WhatsApp Us
+        </a>
+        <a href="tel:+91${filmmakerPhone}" style="display: inline-block; padding: 12px 30px; background: #3b82f6; color: white; text-decoration: none; border-radius: 8px; margin: 0 5px;">
+          📞 Call Us
+        </a>
+      </div>
+      
+      <p style="color: #94a3b8; font-size: 12px; margin-top: 40px; text-align: center;">
+        ${filmmakerName} | ${filmmakerPhone} | ${filmmakerEmail}
+      </p>
+    </div>
+  `
+
+  return sendEmail({ to: bookingData.email, subject, html })
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -179,7 +241,7 @@ export const validateDate = (dateString) => {
   const now = new Date()
   const maxDate = new Date()
   maxDate.setFullYear(maxDate.getFullYear() + 2)
-  
+
   return date > now && date < maxDate
 }
 
@@ -193,31 +255,31 @@ export const sanitizePhone = (phone) => {
 
 export const formatDate = (date, format = 'short') => {
   const d = new Date(date)
-  
+
   if (format === 'short') {
-    return d.toLocaleDateString('en-IN', { 
-      day: '2-digit', 
-      month: 'short', 
-      year: 'numeric' 
+    return d.toLocaleDateString('en-IN', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric'
     })
   }
-  
+
   if (format === 'long') {
-    return d.toLocaleDateString('en-IN', { 
+    return d.toLocaleDateString('en-IN', {
       weekday: 'long',
-      day: 'numeric', 
-      month: 'long', 
-      year: 'numeric' 
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric'
     })
   }
-  
+
   return d.toISOString()
 }
 
 export const getDateRange = (range) => {
   const now = new Date()
   const start = new Date()
-  
+
   switch (range) {
     case 'today':
       start.setHours(0, 0, 0, 0)
@@ -234,7 +296,7 @@ export const getDateRange = (range) => {
     default:
       start.setDate(now.getDate() - 7)
   }
-  
+
   return { start, end: now }
 }
 
@@ -245,22 +307,22 @@ export const getDateRange = (range) => {
 export const detectLanguage = (text) => {
   // Devanagari script (Hindi)
   if (/[\u0900-\u097F]/.test(text)) return 'hi'
-  
+
   // Gujarati script
   if (/[\u0A80-\u0AFF]/.test(text)) return 'gu'
-  
+
   // Check for romanized Hindi/Gujarati words
   const hindiWords = ['kya', 'hai', 'kitna', 'kitne', 'chahiye', 'kaise', 'mujhe', 'aap', 'hum', 'yeh', 'woh']
   const gujaratiWords = ['su', 'che', 'ketla', 'joiye', 'kem', 'tamne', 'ame', 'aa', 'te']
-  
+
   const lowerText = text.toLowerCase()
-  
+
   const hasHindi = hindiWords.some(word => lowerText.includes(word))
   const hasGujarati = gujaratiWords.some(word => lowerText.includes(word))
-  
+
   if (hasGujarati) return 'gu'
   if (hasHindi) return 'hi'
-  
+
   return 'en'
 }
 
@@ -270,7 +332,7 @@ export const detectLanguage = (text) => {
 
 export const calculateBookingScore = (bookingData) => {
   let score = 0
-  
+
   // Complete info provided
   if (bookingData.name) score += 20
   if (bookingData.phone && validatePhone(bookingData.phone)) score += 25
@@ -278,10 +340,10 @@ export const calculateBookingScore = (bookingData) => {
   if (bookingData.eventDate && validateDate(bookingData.eventDate)) score += 15
   if (bookingData.location) score += 10
   if (bookingData.package) score += 10
-  
+
   // Bonus for special requests (shows genuine interest)
   if (bookingData.specialRequests && bookingData.specialRequests.length > 20) score += 5
-  
+
   return Math.min(score, 100)
 }
 
@@ -335,13 +397,13 @@ export const seedDatabase = async () => {
         }
       }
     }
-    
+
     await Config.findOneAndUpdate(
       { _id: 'admin' },
       adminData,
       { upsert: true, new: true }
     )
-    
+
     // 2. Seed Packages
     const packagesData = {
       _id: 'packages',
@@ -421,13 +483,13 @@ export const seedDatabase = async () => {
         }
       ]
     }
-    
+
     await Config.findOneAndUpdate(
       { _id: 'packages' },
       packagesData,
       { upsert: true, new: true }
     )
-    
+
     // 3. Seed Patterns
     const patternsData = {
       _id: 'patterns',
@@ -528,13 +590,13 @@ export const seedDatabase = async () => {
         }
       }
     }
-    
+
     await Config.findOneAndUpdate(
       { _id: 'patterns' },
       patternsData,
       { upsert: true, new: true }
     )
-    
+
     // 4. Seed Responses
     const responsesData = {
       _id: 'responses',
@@ -592,13 +654,13 @@ export const seedDatabase = async () => {
         }
       }
     }
-    
+
     await Config.findOneAndUpdate(
       { _id: 'responses' },
       responsesData,
       { upsert: true, new: true }
     )
-    
+
     console.log('✅ Database seeded successfully')
     return true
   } catch (error) {

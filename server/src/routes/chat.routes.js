@@ -4,7 +4,7 @@
 
 import express from 'express'
 import { v4 as uuidv4 } from 'uuid'
-import { processMessage, handleBooking, getConversation } from '../services/chat.service.js'
+import { processMessage, handleBooking, createBooking, getConversation } from '../services/chat.service.js'
 import { incrementAnalytics } from '../models/index.js'
 
 const router = express.Router()
@@ -122,13 +122,24 @@ router.post('/booking', async (req, res) => {
       name, 
       phone, 
       email, 
-      package: packageName,
+      package: packageData,
       packageId,
       eventDate, 
       location,
       specialRequests,
       value
     } = req.body
+
+    // DEBUG: Log what we're receiving
+    console.log('🔍 DEBUG - Booking request received:', {
+      sessionId,
+      name,
+      phone,
+      packageData,
+      packageId,
+      specialRequests,
+      value
+    })
 
     if (!sessionId) {
       return res.status(400).json({
@@ -144,6 +155,44 @@ router.post('/booking', async (req, res) => {
       })
     }
 
+    // Extract package name from package object or use packageName
+    const packageName = packageData?.name || packageId
+
+    // Check if this is a custom package request (no packageName from form but has package object with custom details)
+    if (packageData?.name === 'Custom Photography Package' && packageId && specialRequests) {
+      // This is a custom package request from the chat widget
+      const result = await createBooking({
+        package: {
+          name: packageData.name,
+          id: packageId,
+          description: specialRequests,
+          price: value || 0
+        },
+        userDetails: {
+          name,
+          mobile: phone
+        },
+        deviceFingerprint: req.headers['x-fingerprint']
+      })
+
+      if (!result.success) {
+        return res.status(400).json({
+          success: false,
+          message: result.error
+        })
+      }
+
+      res.json({
+        success: true,
+        data: {
+          bookingId: result.bookingId,
+          message: result.message
+        }
+      })
+      return
+    }
+
+    // Regular booking flow
     const result = await handleBooking(sessionId, {
       name,
       phone,
@@ -176,6 +225,133 @@ router.post('/booking', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to submit booking'
+    })
+  }
+})
+
+// ═══════════════════════════════════════════════════════════════
+// CHECK EXISTING BOOKING
+// ═══════════════════════════════════════════════════════════════
+
+router.post('/check-booking', async (req, res) => {
+  try {
+    const { mobile, deviceFingerprint } = req.body
+
+    if (!mobile) {
+      return res.status(400).json({
+        success: false,
+        message: 'Mobile number is required'
+      })
+    }
+
+    // Check for existing booking with same mobile and device fingerprint
+    const { Conversation } = await import('../models/index.js')
+    
+    const existingBooking = await Conversation.findOne({
+      'booking.hasBooking': true,
+      'visitor.phone': mobile,
+      'visitor.fingerprint': deviceFingerprint
+    }).sort({ createdAt: -1 })
+
+    if (existingBooking) {
+      res.json({
+        success: true,
+        data: {
+          hasBooking: true,
+          bookingId: existingBooking.booking.packageId || `PG-${existingBooking._id.toString().slice(-6)}`,
+          name: existingBooking.visitor.name,
+          mobile: existingBooking.visitor.phone,
+          status: existingBooking.booking.status,
+          createdAt: existingBooking.createdAt,
+          deviceMatch: true
+        }
+      })
+    } else {
+      // Check for booking with same mobile (different device)
+      const existingMobileBooking = await Conversation.findOne({
+        'booking.hasBooking': true,
+        'visitor.phone': mobile
+      }).sort({ createdAt: -1 })
+
+      if (existingMobileBooking) {
+        res.json({
+          success: true,
+          data: {
+            hasBooking: true,
+            bookingId: existingMobileBooking.booking.packageId || `PG-${existingMobileBooking._id.toString().slice(-6)}`,
+            name: existingMobileBooking.visitor.name,
+            mobile: existingMobileBooking.visitor.phone,
+            status: existingMobileBooking.booking.status,
+            createdAt: existingMobileBooking.createdAt,
+            deviceMatch: false
+          }
+        })
+      } else {
+        res.json({
+          success: true,
+          data: {
+            hasBooking: false
+          }
+        })
+      }
+    }
+  } catch (error) {
+    console.error('Check existing booking error:', error)
+    res.status(500).json({
+      success: false,
+      message: 'Failed to check existing booking'
+    })
+  }
+})
+
+// ═══════════════════════════════════════════════════════════════
+// UPDATE BOOKING
+// ═══════════════════════════════════════════════════════════════
+
+router.put('/booking/:bookingId', async (req, res) => {
+  try {
+    const { bookingId } = req.params
+    const updateData = req.body
+
+    const { Conversation } = await import('../models/index.js')
+    
+    const conversation = await Conversation.findOne({
+      'booking.bookingId': bookingId
+    })
+
+    if (!conversation) {
+      return res.status(404).json({
+        success: false,
+        message: 'Booking not found'
+      })
+    }
+
+    // Update booking details
+    if (updateData.name) {
+      conversation.visitor.name = updateData.name
+    }
+    if (updateData.mobile) {
+      conversation.visitor.phone = updateData.mobile
+    }
+    if (updateData.requirements) {
+      conversation.booking.specialRequests = updateData.requirements
+    }
+
+    await conversation.save()
+
+    res.json({
+      success: true,
+      data: {
+        name: conversation.visitor.name,
+        mobile: conversation.visitor.phone,
+        requirements: conversation.booking.specialRequests
+      }
+    })
+  } catch (error) {
+    console.error('Update booking error:', error)
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update booking'
     })
   }
 })

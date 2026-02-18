@@ -1,42 +1,155 @@
 // ═══════════════════════════════════════════════════════════════
 // PG FILMMAKER - AI Service (Gemini Integration)
+// VERSION: 2.0 - Robust Hybrid Fallback System
 // ═══════════════════════════════════════════════════════════════
 
-import { Config } from '../models/index.js'
-
 // ═══════════════════════════════════════════════════════════════
-// GEMINI API CONFIGURATION
+// CONFIGURATION
 // ═══════════════════════════════════════════════════════════════
 
-const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent'
+const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent'
+
+// Error types for proper handling
+export const AI_ERROR_TYPES = {
+  QUOTA_EXCEEDED: 'QUOTA_EXCEEDED',
+  TIMEOUT: 'TIMEOUT',
+  SAFETY_BLOCKED: 'SAFETY_BLOCKED',
+  INVALID_RESPONSE: 'INVALID_RESPONSE',
+  NETWORK_ERROR: 'NETWORK_ERROR',
+  API_KEY_MISSING: 'API_KEY_MISSING',
+  UNKNOWN: 'UNKNOWN'
+}
+
+// Track AI availability status
+let aiStatus = {
+  isAvailable: true,
+  lastError: null,
+  lastErrorTime: null,
+  consecutiveFailures: 0,
+  cooldownUntil: null
+}
+
+// Abuse word lists (expandable)
+const ABUSE_WORDS = {
+  profanity: [
+    'fuck', 'shit', 'ass', 'damn', 'bitch', 'bastard',
+    'gaali', 'gandu', 'chutiya', 'madarchod', 'bhenchod',
+    'ગાળ', 'ભડવો', 'गाली', 'भड़वा'
+  ],
+  threats: [
+    'kill', 'die', 'murder', 'attack', 'bomb', 'hurt',
+    'मारूंगा', 'मार डालूंगा', 'મારી નાખીશ'
+  ],
+  spam: [
+    'click here', 'free money', 'lottery', 'winner', 'prize',
+    'earn money fast', 'work from home', 'bitcoin', 'crypto scam'
+  ],
+  insults: [
+    'scam', 'fake', 'cheat', 'fraud', 'liar', 'thief',
+    'idiot', 'stupid', 'dumb', 'fool', 'useless',
+    'बेवकूफ', 'मूर्ख', 'ચોર', 'મૂરખ'
+  ]
+}
 
 // ═══════════════════════════════════════════════════════════════
-// CORE GEMINI API CALL
+// AI STATUS MANAGEMENT
+// ═══════════════════════════════════════════════════════════════
+
+export const getAIStatus = () => ({ ...aiStatus })
+
+export const resetAIStatus = () => {
+  aiStatus = {
+    isAvailable: true,
+    lastError: null,
+    lastErrorTime: null,
+    consecutiveFailures: 0,
+    cooldownUntil: null
+  }
+  console.log('✅ AI status reset')
+}
+
+const handleAIFailure = (errorType, message = '') => {
+  aiStatus.lastError = errorType
+  aiStatus.lastErrorTime = new Date()
+  aiStatus.consecutiveFailures++
+  
+  // If quota exceeded or too many failures, set cooldown
+  if (errorType === AI_ERROR_TYPES.QUOTA_EXCEEDED || aiStatus.consecutiveFailures >= 3) {
+    const cooldownMinutes = errorType === AI_ERROR_TYPES.QUOTA_EXCEEDED ? 60 : 5
+    aiStatus.cooldownUntil = new Date(Date.now() + cooldownMinutes * 60 * 1000)
+    aiStatus.isAvailable = false
+    console.warn(`⚠️ AI cooldown activated for ${cooldownMinutes} minutes: ${message}`)
+  }
+}
+
+const handleAISuccess = () => {
+  aiStatus.isAvailable = true
+  aiStatus.consecutiveFailures = 0
+  aiStatus.cooldownUntil = null
+}
+
+const isAICoolingDown = () => {
+  if (!aiStatus.cooldownUntil) return false
+  
+  if (new Date() > aiStatus.cooldownUntil) {
+    // Cooldown expired, reset
+    aiStatus.isAvailable = true
+    aiStatus.cooldownUntil = null
+    aiStatus.consecutiveFailures = 0
+    console.log('✅ AI cooldown expired, resuming service')
+    return false
+  }
+  
+  return true
+}
+
+// ═══════════════════════════════════════════════════════════════
+// GEMINI API CALL (with robust error handling)
 // ═══════════════════════════════════════════════════════════════
 
 export const callGemini = async (prompt, options = {}) => {
   const apiKey = process.env.GEMINI_API_KEY
   
+  // Check API key
   if (!apiKey) {
-    console.warn('⚠️ Gemini API key not configured')
-    return null
+    console.error('❌ FATAL: GEMINI_API_KEY is missing in .env file')
+    return {
+      success: false,
+      error: AI_ERROR_TYPES.API_KEY_MISSING,
+      data: null
+    }
+  }
+
+  // Check if AI is cooling down
+  if (isAICoolingDown()) {
+    const remainingMs = aiStatus.cooldownUntil - new Date()
+    const remainingMins = Math.ceil(remainingMs / 60000)
+    console.log(`⏳ AI cooling down, ${remainingMins} minutes remaining`)
+    return {
+      success: false,
+      error: AI_ERROR_TYPES.QUOTA_EXCEEDED,
+      data: null,
+      cooldownRemaining: remainingMins
+    }
   }
 
   try {
+    console.log('🤖 Sending request to Gemini...')
+    
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 15000) // 15s timeout
+
     const response = await fetch(`${GEMINI_API_URL}?key=${apiKey}`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
       body: JSON.stringify({
-        contents: [{
-          parts: [{ text: prompt }]
-        }],
+        contents: [{ parts: [{ text: prompt }] }],
         generationConfig: {
           temperature: options.temperature || 0.7,
-          maxOutputTokens: options.maxTokens || 200,
-          topP: options.topP || 0.8,
-          topK: options.topK || 40
+          maxOutputTokens: options.maxTokens || 500,
+          topP: 0.9,
+          topK: 40
         },
         safetySettings: [
           { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_MEDIUM_AND_ABOVE' },
@@ -47,76 +160,278 @@ export const callGemini = async (prompt, options = {}) => {
       })
     })
 
-    if (!response.ok) {
-      const error = await response.json()
-      console.error('❌ Gemini API error:', error)
-      return null
-    }
+    clearTimeout(timeout)
 
     const data = await response.json()
-    
-    if (data.candidates && data.candidates[0]?.content?.parts?.[0]?.text) {
-      return data.candidates[0].content.parts[0].text.trim()
+
+    // Handle HTTP errors
+    if (!response.ok) {
+      console.error('❌ Gemini API Error:', response.status, JSON.stringify(data, null, 2))
+      
+      // Specifically handle 429 (quota exceeded)
+      if (response.status === 429) {
+        handleAIFailure(AI_ERROR_TYPES.QUOTA_EXCEEDED, 'Rate limit exceeded')
+        return {
+          success: false,
+          error: AI_ERROR_TYPES.QUOTA_EXCEEDED,
+          data: null
+        }
+      }
+      
+      // Handle other errors
+      handleAIFailure(AI_ERROR_TYPES.UNKNOWN, `HTTP ${response.status}`)
+      return {
+        success: false,
+        error: AI_ERROR_TYPES.UNKNOWN,
+        data: null
+      }
     }
 
-    return null
+    // Parse response
+    if (data.candidates && data.candidates.length > 0) {
+      const candidate = data.candidates[0]
+      
+      // Check for blocked content
+      if (candidate.finishReason === 'SAFETY') {
+        console.warn('⚠️ Gemini blocked response due to safety')
+        return {
+          success: false,
+          error: AI_ERROR_TYPES.SAFETY_BLOCKED,
+          data: null
+        }
+      }
+      
+      const text = candidate.content?.parts?.[0]?.text?.trim()
+      if (text) {
+        console.log('✅ Gemini Response:', text.substring(0, 100) + '...')
+        handleAISuccess()
+        return {
+          success: true,
+          error: null,
+          data: text
+        }
+      }
+    }
+    
+    console.warn('⚠️ Gemini returned no valid response:', data)
+    handleAIFailure(AI_ERROR_TYPES.INVALID_RESPONSE, 'No valid content')
+    return {
+      success: false,
+      error: AI_ERROR_TYPES.INVALID_RESPONSE,
+      data: null
+    }
+
   } catch (error) {
-    console.error('❌ Gemini API call failed:', error.message)
-    return null
+    if (error.name === 'AbortError') {
+      console.error('❌ Gemini API timeout (15s)')
+      handleAIFailure(AI_ERROR_TYPES.TIMEOUT, 'Request timed out')
+      return {
+        success: false,
+        error: AI_ERROR_TYPES.TIMEOUT,
+        data: null
+      }
+    }
+    
+    console.error('❌ Network/Server Error calling Gemini:', error.message)
+    handleAIFailure(AI_ERROR_TYPES.NETWORK_ERROR, error.message)
+    return {
+      success: false,
+      error: AI_ERROR_TYPES.NETWORK_ERROR,
+      data: null
+    }
   }
 }
 
 // ═══════════════════════════════════════════════════════════════
-// CHAT RESPONSE (When pattern matching fails)
+// SMART BOOKING DATA EXTRACTION (AI-Powered)
+// ═══════════════════════════════════════════════════════════════
+
+export const extractBookingDetailsAI = async (message, context = {}) => {
+  const currentDate = new Date()
+  const currentDateStr = currentDate.toISOString().split('T')[0]
+  const currentDay = currentDate.toLocaleDateString('en-US', { weekday: 'long' })
+  
+  const prompt = `You are a professional booking assistant for a photography business.
+
+**Current Date & Time:**
+- Today is: ${currentDay}, ${currentDateStr}
+- Current time: ${currentDate.toLocaleTimeString('en-US', { hour12: false })}
+
+**Available Photography Packages:**
+- Portrait (₹25,000)
+- Wedding (₹75,000)
+- Pre-wedding (₹35,000)
+- Event (₹50,000)
+- Maternity (₹20,000)
+- Baby (₹15,000)
+
+**Current Booking State (what we already know):**
+${JSON.stringify(context, null, 2)}
+
+**User's Message:**
+"${message}"
+
+**Your Task:**
+Extract booking information from the user's message. Handle natural language, Hinglish, dates like "tomorrow", "next friday", "kal", "parso", etc.
+
+**Output STRICT JSON format (no extra text, no markdown):**
+{
+  "name": "full name or null",
+  "phone": "10-digit number or null",
+  "date": "YYYY-MM-DD format or null",
+  "date_formatted": "human readable date or null",
+  "time": "HH:MM 24-hour format or null",
+  "time_formatted": "human readable time or null",
+  "package": "portrait|wedding|prewedding|event|maternity|baby or null",
+  "location": "city/venue name or null",
+  "intent": "booking|cancel|confirm|change|info|greeting|none",
+  "confidence": 0.0 to 1.0
+}
+
+**Rules:**
+1. If user says "tomorrow", calculate actual date
+2. If user says "next friday", calculate the actual date
+3. Convert "kal" (Hindi) to tomorrow's date
+4. Convert "parso" (Hindi) to day after tomorrow
+5. If time is "morning", use "09:00", "afternoon" = "14:00", "evening" = "17:00"
+6. Package detection should be flexible (e.g., "shaadi" = wedding, "shadi" = wedding)
+7. intent = "confirm" if user says yes/ok/correct/haan/ha during confirmation
+8. intent = "change" if user wants to modify something
+9. intent = "cancel" if user wants to stop/exit
+10. confidence should reflect how certain you are (0.9+ for explicit data, 0.5-0.8 for implied)
+
+**Output JSON only:**`
+
+  try {
+    const result = await callGemini(prompt, { 
+      temperature: 0.1, // Very low for precision
+      maxTokens: 300 
+    })
+    
+    // Check if AI call failed
+    if (!result.success) {
+      console.warn(`⚠️ AI extraction failed: ${result.error}`)
+      return {
+        success: false,
+        error: result.error,
+        data: null,
+        usedFallback: false
+      }
+    }
+
+    // Clean any markdown formatting Gemini might add
+    let cleanJson = result.data.trim()
+    
+    // Remove ```json and ``` if present
+    if (cleanJson.startsWith('```json')) {
+      cleanJson = cleanJson.replace(/```json\n?/g, '')
+    }
+    if (cleanJson.startsWith('```')) {
+      cleanJson = cleanJson.replace(/```\n?/g, '')
+    }
+    if (cleanJson.endsWith('```')) {
+      cleanJson = cleanJson.replace(/\n?```$/g, '')
+    }
+    
+    const parsed = JSON.parse(cleanJson)
+    
+    console.log('✅ AI Extracted:', parsed)
+    return {
+      success: true,
+      error: null,
+      data: parsed,
+      usedFallback: false
+    }
+    
+  } catch (error) {
+    console.error('❌ AI Extraction Parse Error:', error.message)
+    return {
+      success: false,
+      error: AI_ERROR_TYPES.INVALID_RESPONSE,
+      data: null,
+      usedFallback: false
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// CHAT RESPONSE (General Conversation)
 // ═══════════════════════════════════════════════════════════════
 
 export const getChatResponse = async (userMessage, context = {}) => {
   const filmmakerName = process.env.FILMMAKER_NAME || 'PG Films'
-  const phone = process.env.FILMMAKER_PHONE || '+91 98765 43210'
+  const filmmakerPhone = process.env.FILMMAKER_PHONE || '+91 98765 43210'
   
-  // Get packages for context
-  let packagesInfo = ''
-  try {
-    const packagesConfig = await Config.findOne({ _id: 'packages' })
-    if (packagesConfig?.data) {
-      packagesInfo = packagesConfig.data
-        .filter(p => p.active)
-        .map(p => `• ${p.name}: ₹${p.price.toLocaleString()} (${p.duration})`)
-        .join('\n')
-    }
-  } catch (e) {
-    packagesInfo = '• Wedding Gold: ₹75,000\n• Portrait: ₹25,000\n• Event: ₹50,000'
+  // Determine response language
+  const langMap = {
+    'en': 'English',
+    'hi': 'Hindi',
+    'gu': 'Gujarati'
   }
-
-  const prompt = `You are a helpful assistant for ${filmmakerName}, a professional photographer/filmmaker.
-
-BUSINESS INFO:
-- Name: ${filmmakerName}
-- Services: Wedding photography, Portrait sessions, Event coverage, Pre-wedding shoots
-- Packages:
-${packagesInfo}
-- Location: ${process.env.FILMMAKER_LOCATION || 'Gujarat, India'}
-- Phone: ${phone}
-
-CONVERSATION CONTEXT:
-- User's language: ${context.language || 'English'}
-- Previous messages: ${context.conversationHistory || 'None'}
-
-YOUR ROLE:
-- Be friendly, professional, and enthusiastic about photography
-- Keep responses SHORT (2-3 sentences max)
-- If user wants to book, collect: name, event date, location, phone
-- If question is unclear, suggest viewing packages or contacting directly
-- Use emojis sparingly (1-2 max) 📸
-- Respond in the same language the user is using
-
-USER MESSAGE: "${userMessage}"
-
-RESPOND (keep it brief and helpful):`
-
-  const response = await callGemini(prompt, { maxTokens: 150 })
+  const responseLang = langMap[context.language] || 'English'
   
-  return response || getFallbackResponse(context.language)
+  // Build context-aware prompt
+  const prompt = `You are ${filmmakerName}'s friendly AI assistant chatbot for a photography business in Gujarat, India.
+
+**Your Personality:**
+- Professional yet warm and friendly
+- Helpful and patient
+- Knowledgeable about photography services
+- Speaks naturally, not robotic
+
+**Business Information:**
+- Name: ${filmmakerName}
+- Location: Gujarat, India
+- Phone/WhatsApp: ${filmmakerPhone}
+- Services & Pricing:
+  • Wedding Photography: ₹75,000
+  • Portrait Session: ₹25,000
+  • Pre-Wedding Shoot: ₹35,000
+  • Event Coverage: ₹50,000
+  • Maternity Shoot: ₹20,000
+  • Baby Shoot: ₹15,000
+- All packages include: Edited photos, Online delivery, Professional equipment
+
+**User's Message:** "${userMessage}"
+
+**Conversation Context:**
+${context.conversationHistory ? `Previous messages: ${context.conversationHistory}` : 'New conversation'}
+
+**Instructions:**
+1. Respond in ${responseLang} language
+2. Keep response SHORT (2-4 sentences max)
+3. Be helpful and guide toward booking
+4. If user asks about prices, mention relevant packages
+5. If user seems interested, encourage them to book or share contact
+6. Don't use markdown formatting like ** or ##
+7. Use emojis sparingly (1-2 max)
+8. If you don't understand, politely ask for clarification
+9. Never make up information not provided above
+
+**Your Response:**`
+
+  const result = await callGemini(prompt, {
+    temperature: 0.7,
+    maxTokens: 300
+  })
+  
+  if (result.success && result.data) {
+    return {
+      success: true,
+      data: result.data
+        .replace(/\*\*/g, '')  // Remove markdown bold
+        .replace(/##/g, '')    // Remove headers
+        .replace(/\n{3,}/g, '\n\n') // Limit newlines
+        .trim(),
+      error: null
+    }
+  }
+  
+  return {
+    success: false,
+    data: null,
+    error: result.error
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -124,76 +439,65 @@ RESPOND (keep it brief and helpful):`
 // ═══════════════════════════════════════════════════════════════
 
 export const detectAbuse = async (message) => {
-  // First, check against local abuse word list
-  try {
-    const patternsConfig = await Config.findOne({ _id: 'patterns' })
-    const abuseWords = patternsConfig?.data?.abuseWords || {}
-    
-    const lowerMessage = message.toLowerCase()
-    
-    // Check severe words
-    if (abuseWords.severe?.words?.some(word => lowerMessage.includes(word.toLowerCase()))) {
-      return { isAbusive: true, type: 'severe', confidence: 1.0, action: 'block' }
-    }
-    
-    // Check moderate words
-    if (abuseWords.moderate?.words?.some(word => lowerMessage.includes(word.toLowerCase()))) {
-      return { isAbusive: true, type: 'moderate', confidence: 0.9, action: 'mask' }
-    }
-    
-    // Check mild words
-    if (abuseWords.mild?.words?.some(word => lowerMessage.includes(word.toLowerCase()))) {
-      return { isAbusive: true, type: 'mild', confidence: 0.7, action: 'log' }
-    }
-  } catch (e) {
-    console.error('Error checking local abuse words:', e.message)
+  if (!message || typeof message !== 'string') {
+    return { isAbusive: false }
   }
-
-  // If local check passes and AI detection is enabled, use Gemini
-  try {
-    const patternsConfig = await Config.findOne({ _id: 'patterns' })
-    const enableAIDetection = patternsConfig?.data?.abuseSettings?.enableAIDetection
-    
-    if (!enableAIDetection) {
-      return { isAbusive: false }
-    }
-  } catch (e) {
-    // Continue with AI check if config unavailable
-  }
-
-  const prompt = `Analyze this message for inappropriate content in a photography booking context.
-
-MESSAGE: "${message}"
-
-Check for:
-1. Profanity or vulgar language
-2. Threats or harassment
-3. Spam or promotional content
-4. Inappropriate requests
-
-Respond with ONLY a JSON object (no markdown, no code blocks):
-{"isAbusive": true/false, "type": "profanity|threat|spam|harassment|none", "confidence": 0.0-1.0, "reason": "brief explanation"}`
-
-  try {
-    const response = await callGemini(prompt, { temperature: 0.3, maxTokens: 100 })
-    
-    if (response) {
-      // Clean the response - remove any markdown formatting
-      const cleanedResponse = response.replace(/```json\n?|\n?```/g, '').trim()
-      const result = JSON.parse(cleanedResponse)
-      
-      return {
-        isAbusive: result.isAbusive || false,
-        type: result.type || 'none',
-        confidence: result.confidence || 0,
-        reason: result.reason || '',
-        action: result.isAbusive ? (result.confidence > 0.8 ? 'block' : 'mask') : 'none'
+  
+  const lowerMessage = message.toLowerCase().trim()
+  
+  // Check each category
+  for (const [category, words] of Object.entries(ABUSE_WORDS)) {
+    for (const word of words) {
+      if (lowerMessage.includes(word.toLowerCase())) {
+        console.warn(`⚠️ Abuse detected [${category}]: "${word}" in message`)
+        
+        // Determine action based on severity
+        let action = 'mask'
+        if (category === 'threats') {
+          action = 'block'
+        } else if (category === 'profanity' && words.indexOf(word) < 6) {
+          action = 'block'
+        }
+        
+        return {
+          isAbusive: true,
+          type: category,
+          word: word,
+          action: action,
+          severity: action === 'block' ? 'high' : 'medium'
+        }
       }
     }
-  } catch (e) {
-    console.error('AI abuse detection error:', e.message)
   }
-
+  
+  // Check for spam patterns
+  const spamPatterns = [
+    /(.)\1{5,}/,  // Repeated characters
+    /\b\d{10,}\b/g,  // Long number strings
+    /(https?:\/\/[^\s]+){2,}/g  // Multiple URLs
+  ]
+  
+  for (const pattern of spamPatterns) {
+    if (pattern.test(lowerMessage)) {
+      return {
+        isAbusive: true,
+        type: 'spam',
+        action: 'warn',
+        severity: 'low'
+      }
+    }
+  }
+  
+  // Check message length
+  if (message.length > 1000) {
+    return {
+      isAbusive: true,
+      type: 'spam',
+      action: 'warn',
+      severity: 'low'
+    }
+  }
+  
   return { isAbusive: false }
 }
 
@@ -202,157 +506,136 @@ Respond with ONLY a JSON object (no markdown, no code blocks):
 // ═══════════════════════════════════════════════════════════════
 
 export const detectLanguageAI = async (message) => {
-  // First try rule-based detection
-  // Devanagari script (Hindi)
+  if (!message) return 'en'
+  
+  // Hindi Unicode range
   if (/[\u0900-\u097F]/.test(message)) return 'hi'
   
-  // Gujarati script
+  // Gujarati Unicode range
   if (/[\u0A80-\u0AFF]/.test(message)) return 'gu'
   
-  // Check for common romanized words
-  const hindiWords = ['kya', 'hai', 'kitna', 'kitne', 'chahiye', 'kaise', 'mujhe', 'aap', 'nahi', 'haan']
-  const gujaratiWords = ['su', 'che', 'ketla', 'joiye', 'kem', 'nathi', 'haa', 'tamne', 'ame']
-  
-  const lowerMessage = message.toLowerCase()
-  
-  const hindiScore = hindiWords.filter(word => lowerMessage.includes(word)).length
-  const gujaratiScore = gujaratiWords.filter(word => lowerMessage.includes(word)).length
-  
-  if (gujaratiScore > hindiScore && gujaratiScore >= 1) return 'gu'
-  if (hindiScore > gujaratiScore && hindiScore >= 1) return 'hi'
-  
-  // If still unclear and message is short, use English
-  if (message.length < 20) return 'en'
-  
-  // For longer messages, optionally use AI
-  const prompt = `Detect the language of this message. It could be English, Hindi (including romanized Hindi/Hinglish), or Gujarati (including romanized Gujarati).
-
-MESSAGE: "${message}"
-
-Respond with ONLY one of these codes: en, hi, gu`
-
-  try {
-    const response = await callGemini(prompt, { temperature: 0.1, maxTokens: 10 })
-    
-    if (response) {
-      const lang = response.toLowerCase().trim()
-      if (['en', 'hi', 'gu'].includes(lang)) {
-        return lang
-      }
-    }
-  } catch (e) {
-    console.error('Language detection error:', e.message)
+  // Check for common Gujarati words in Roman script
+  const gujaratiWords = [
+    'kem', 'cho', 'su', 'che', 'nathi', 'haan', 'na', 'tamne', 
+    'mane', 'aapne', 'ketla', 'kyare', 'kya', 'joiye', 'karvu'
+  ]
+  const lowerMsg = message.toLowerCase()
+  if (gujaratiWords.some(w => lowerMsg.includes(w))) {
+    return 'gu'
   }
-
-  return 'en' // Default to English
+  
+  // Check for common Hindi words in Roman script
+  const hindiWords = [
+    'kya', 'hai', 'haan', 'nahi', 'kitna', 'kab', 'kaise', 
+    'chahiye', 'dijiye', 'batao', 'bolo', 'acha', 'theek'
+  ]
+  if (hindiWords.some(w => lowerMsg.includes(w))) {
+    return 'hi'
+  }
+  
+  return 'en'
 }
 
 // ═══════════════════════════════════════════════════════════════
-// INTENT SUGGESTION (For learning new patterns)
+// INTENT SUGGESTION
 // ═══════════════════════════════════════════════════════════════
 
-export const suggestIntent = async (query) => {
-  const prompt = `For a photographer's chatbot, which intent category does this query belong to?
-
-QUERY: "${query}"
-
-AVAILABLE INTENTS:
-- greeting: Hello, hi, welcome messages
-- pricing: Questions about cost, packages, rates
-- portfolio: Requests to see work, photos, videos
-- availability: Questions about dates, booking availability
-- contact: Requests for phone, email, WhatsApp
-- booking: Intent to book/hire services
-- thanks: Thank you, goodbye messages
-
-Respond with ONLY the intent name (lowercase, single word):`
-
-  try {
-    const response = await callGemini(prompt, { temperature: 0.3, maxTokens: 20 })
-    
-    if (response) {
-      const intent = response.toLowerCase().trim().replace(/[^a-z]/g, '')
-      const validIntents = ['greeting', 'pricing', 'portfolio', 'availability', 'contact', 'booking', 'thanks']
-      
-      if (validIntents.includes(intent)) {
-        return intent
-      }
+export const suggestIntent = async (message) => {
+  if (!message) return null
+  
+  const lowerMsg = message.toLowerCase()
+  
+  const intentPatterns = [
+    { pattern: /book|reserve|want|need|interest/i, intent: 'booking' },
+    { pattern: /price|cost|rate|charge|kitna|ketla/i, intent: 'showPackages' },
+    { pattern: /portfolio|sample|work|photo|gallery/i, intent: 'showPortfolio' },
+    { pattern: /contact|phone|call|whatsapp|number/i, intent: 'showContact' },
+    { pattern: /available|date|free|slot/i, intent: 'checkAvailability' },
+    { pattern: /thank|thanks|dhanyavad/i, intent: 'thankYou' },
+    { pattern: /hi|hello|hey|namaste/i, intent: 'greeting' }
+  ]
+  
+  for (const { pattern, intent } of intentPatterns) {
+    if (pattern.test(lowerMsg)) {
+      return intent
     }
-  } catch (e) {
-    console.error('Intent suggestion error:', e.message)
   }
-
+  
   return null
 }
 
 // ═══════════════════════════════════════════════════════════════
-// SMART REPLY (Context-aware responses)
+// SMART REPLY SUGGESTIONS
 // ═══════════════════════════════════════════════════════════════
 
-export const getSmartReply = async (userMessage, conversationHistory, language = 'en') => {
-  const filmmakerName = process.env.FILMMAKER_NAME || 'PG Films'
+export const getSmartReply = async (message, context = {}) => {
+  const lowerMsg = message.toLowerCase()
   
-  // Build conversation context
-  const historyText = conversationHistory
-    .slice(-6) // Last 6 messages
-    .map(m => `${m.role === 'user' ? 'User' : 'Bot'}: ${m.text}`)
-    .join('\n')
-
-  const languageInstruction = {
-    en: 'Respond in English',
-    hi: 'Respond in Hindi (you can use Hinglish)',
-    gu: 'Respond in Gujarati (you can use Gujarati with English)'
+  if (/price|package|cost/i.test(lowerMsg)) {
+    return ['Book Now', 'View Portfolio', 'Contact Us']
   }
-
-  const prompt = `You are a helpful assistant for ${filmmakerName}, a photographer.
-
-CONVERSATION SO FAR:
-${historyText}
-
-USER'S NEW MESSAGE: "${userMessage}"
-
-${languageInstruction[language] || 'Respond in English'}
-
-Instructions:
-- Keep response brief (2-3 sentences)
-- Be helpful and friendly
-- If they want to book, ask for: event date, location, name, phone
-- Use 1-2 emojis max
-
-YOUR RESPONSE:`
-
-  try {
-    const response = await callGemini(prompt, { maxTokens: 150 })
-    return response
-  } catch (e) {
-    console.error('Smart reply error:', e.message)
-    return null
+  
+  if (/book|reserve/i.test(lowerMsg)) {
+    return ['Portrait ₹25k', 'Wedding ₹75k', 'Contact Us']
   }
+  
+  if (/portfolio|sample/i.test(lowerMsg)) {
+    return ['Show Packages', 'Book Now', 'Contact']
+  }
+  
+  return ['Show Packages', 'View Portfolio', 'Book Now', 'Contact']
 }
 
 // ═══════════════════════════════════════════════════════════════
-// FALLBACK RESPONSES
+// SENTIMENT ANALYSIS
 // ═══════════════════════════════════════════════════════════════
 
-const getFallbackResponse = (language = 'en') => {
-  const fallbacks = {
-    en: "I'm here to help! 😊 You can ask me about our packages, see our portfolio, or book a session. What would you like to know?",
-    hi: "मैं मदद के लिए हूं! 😊 आप पैकेज के बारे में पूछ सकते हैं, पोर्टफोलियो देख सकते हैं, या सेशन बुक कर सकते हैं।",
-    gu: "હું મદદ માટે છું! 😊 તમે પેકેજ વિશે પૂછી શકો, પોર્ટફોલિયો જોઈ શકો, અથવા સેશન બુક કરી શકો."
+export const analyzeSentiment = (message) => {
+  if (!message) return 'neutral'
+  
+  const lowerMsg = message.toLowerCase()
+  
+  const positiveWords = [
+    'great', 'good', 'nice', 'love', 'awesome', 'beautiful', 'perfect',
+    'thanks', 'thank', 'excellent', 'amazing', 'wonderful', 'best',
+    'सुंदर', 'अच्छा', 'बढ़िया', 'સરસ', 'સુંદર', 'મસ્ત'
+  ]
+  
+  const negativeWords = [
+    'bad', 'poor', 'terrible', 'worst', 'hate', 'awful', 'expensive',
+    'slow', 'boring', 'disappointed', 'waste', 'problem',
+    'बुरा', 'खराब', 'ખરાબ', 'મોંઘું'
+  ]
+  
+  let score = 0
+  
+  for (const word of positiveWords) {
+    if (lowerMsg.includes(word)) score++
   }
   
-  return fallbacks[language] || fallbacks.en
+  for (const word of negativeWords) {
+    if (lowerMsg.includes(word)) score--
+  }
+  
+  if (score > 0) return 'positive'
+  if (score < 0) return 'negative'
+  return 'neutral'
 }
 
 // ═══════════════════════════════════════════════════════════════
-// EXPORTS
+// NAMED EXPORTS (for ES modules)
 // ═══════════════════════════════════════════════════════════════
 
 export default {
+  AI_ERROR_TYPES,
+  getAIStatus,
+  resetAIStatus,
   callGemini,
+  extractBookingDetailsAI,
   getChatResponse,
   detectAbuse,
   detectLanguageAI,
   suggestIntent,
-  getSmartReply
+  getSmartReply,
+  analyzeSentiment
 }

@@ -15,23 +15,99 @@ const messageSchema = new Schema({
   id: { type: String, required: true },
   role: { type: String, enum: ['user', 'bot'], required: true },
   text: { type: String, required: true },
-  displayText: { type: String, default: null }, // Filtered version if abuse
+  displayText: { type: String, default: null },
   intent: { type: String, default: null },
   confidence: { type: Number, default: 0 },
-  responseType: { type: String, enum: ['instant', 'pattern', 'ai'], default: 'instant' },
+  responseType: { type: String, enum: ['instant', 'pattern', 'ai', 'booking', 'fallback'], default: 'instant' },
   abuseDetected: { type: Boolean, default: false },
   abuseType: { type: String, default: null },
   timestamp: { type: Date, default: Date.now }
 })
 
-const conversationSchema = new Schema({
-  sessionId: { 
-    type: String, 
-    required: true, 
-    unique: true,
-    index: true 
+// ═══════════════════════════════════════════════════════════════
+// BOOKING CONTEXT SCHEMA (NEW!)
+// Tracks the booking flow state across messages
+// ═══════════════════════════════════════════════════════════════
+
+const bookingContextSchema = new Schema({
+  // Current state in booking flow
+  state: {
+    type: String,
+    enum: [
+      'none',           // Not in booking flow
+      'started',        // Booking started, collecting info
+      'awaiting_package', // Waiting for package selection
+      'awaiting_date',  // Waiting for date
+      'awaiting_time',  // Waiting for time
+      'awaiting_name',  // Waiting for name
+      'awaiting_phone', // Waiting for phone
+      'awaiting_email', // Waiting for email (optional)
+      'awaiting_location', // Waiting for location
+      'confirming',     // All info collected, confirming
+      'completed',      // Booking submitted
+      'cancelled'       // User cancelled
+    ],
+    default: 'none'
   },
-  
+
+  // Selected package info
+  package: {
+    type: { type: String, default: null },  // 'portrait', 'wedding', etc.
+    name: { type: String, default: null },
+    price: { type: Number, default: null },
+    emoji: { type: String, default: null }
+  },
+
+  // Extracted date info
+  date: {
+    raw: { type: String, default: null },      // Original user input
+    formatted: { type: String, default: null }, // Formatted for display
+    value: { type: Date, default: null }        // Actual Date object
+  },
+
+  // Extracted time info
+  time: {
+    raw: { type: String, default: null },
+    formatted: { type: String, default: null }
+  },
+
+  // User details
+  name: { type: String, default: null },
+  phone: { type: String, default: null },
+  email: { type: String, default: null },
+  location: { type: String, default: null },
+  specialRequests: { type: String, default: null },
+
+  // Tracking
+  startedAt: { type: Date, default: null },
+  lastUpdated: { type: Date, default: null },
+  completedAt: { type: Date, default: null },
+
+  // CRITICAL: Track which field was last asked so extraction knows context
+  lastAskedField: { type: String, default: null },
+
+  // How many times user was prompted for each field
+  promptCounts: {
+    package: { type: Number, default: 0 },
+    date: { type: Number, default: 0 },
+    time: { type: Number, default: 0 },
+    name: { type: Number, default: 0 },
+    phone: { type: Number, default: 0 }
+  }
+}, { _id: false })
+
+// ═══════════════════════════════════════════════════════════════
+// MAIN CONVERSATION SCHEMA
+// ═══════════════════════════════════════════════════════════════
+
+const conversationSchema = new Schema({
+  sessionId: {
+    type: String,
+    required: true,
+    unique: true,
+    index: true
+  },
+
   // Visitor Information
   visitor: {
     fingerprint: { type: String, default: null },
@@ -43,26 +119,35 @@ const conversationSchema = new Schema({
     ipAddress: { type: String, default: null },
     userAgent: { type: String, default: null }
   },
-  
-  // Messages (max 50 per conversation for storage efficiency)
+
+  // Messages (max 200 per conversation for storage efficiency)
   messages: {
     type: [messageSchema],
     validate: [
-      { validator: (v) => v.length <= 50, message: 'Max 50 messages per conversation' }
+      { validator: (v) => v.length <= 200, message: 'Max 200 messages per conversation' }
     ]
   },
-  
-  // Booking Information
+
+  // ═══════════════════════════════════════════════════════════
+  // BOOKING CONTEXT (NEW!) - Tracks booking flow state
+  // ═══════════════════════════════════════════════════════════
+  bookingContext: {
+    type: bookingContextSchema,
+    default: () => ({ state: 'none' })
+  },
+
+  // Booking Information (Final booking record)
   booking: {
     hasBooking: { type: Boolean, default: false },
-    package: { type: String, default: null },
+    package: { type: mongoose.Schema.Types.Mixed, default: null },
     packageId: { type: String, default: null },
     eventDate: { type: Date, default: null },
+    eventTime: { type: String, default: null },
     eventLocation: { type: String, default: null },
     estimatedValue: { type: Number, default: null },
     specialRequests: { type: String, default: null },
-    status: { 
-      type: String, 
+    status: {
+      type: String,
       enum: ['none', 'inquiry', 'pending', 'contacted', 'confirmed', 'completed', 'cancelled'],
       default: 'none'
     },
@@ -73,18 +158,18 @@ const conversationSchema = new Schema({
       changedBy: { type: String, default: 'system' }
     }]
   },
-  
+
   // Abuse Tracking
   abuse: {
     hasAbuse: { type: Boolean, default: false },
     count: { type: Number, default: 0 },
     types: [String],
-    messages: [String], // Message IDs that were flagged
+    messages: [String],
     reviewedByAdmin: { type: Boolean, default: false },
     adminAction: { type: String, default: null },
     blockedAt: { type: Date, default: null }
   },
-  
+
   // Soft Delete Fields
   deletion: {
     isDeleted: { type: Boolean, default: false, index: true },
@@ -95,7 +180,7 @@ const conversationSchema = new Schema({
     recoveredAt: { type: Date, default: null },
     recoveredCount: { type: Number, default: 0 }
   },
-  
+
   // Metadata
   meta: {
     device: { type: String, default: 'unknown' },
@@ -114,7 +199,7 @@ const conversationSchema = new Schema({
     sessionDuration: { type: Number, default: 0 },
     successful: { type: Boolean, default: false }
   },
-  
+
   // Learning Contribution
   learning: {
     patternsUsed: [String],
@@ -131,8 +216,96 @@ const conversationSchema = new Schema({
 // Indexes for efficient queries
 conversationSchema.index({ 'visitor.phone': 1 })
 conversationSchema.index({ 'booking.status': 1 })
+conversationSchema.index({ 'bookingContext.state': 1 })
 conversationSchema.index({ 'meta.successful': 1 })
 conversationSchema.index({ createdAt: -1 })
+
+// ═══════════════════════════════════════════════════════════════
+// VIRTUAL: Check if conversation is in active booking flow
+// ═══════════════════════════════════════════════════════════════
+
+conversationSchema.virtual('isInBookingFlow').get(function () {
+  const activeStates = ['started', 'awaiting_package', 'awaiting_date', 'awaiting_time', 'awaiting_name', 'awaiting_phone', 'awaiting_email', 'awaiting_location', 'confirming']
+  return activeStates.includes(this.bookingContext?.state)
+})
+
+// ═══════════════════════════════════════════════════════════════
+// METHOD: Get missing booking fields
+// ═══════════════════════════════════════════════════════════════
+
+conversationSchema.methods.getMissingBookingFields = function () {
+  const ctx = this.bookingContext
+  const missing = []
+
+  if (!ctx.package?.type) missing.push('package')
+  if (!ctx.date?.value) missing.push('date')
+  if (!ctx.time?.formatted) missing.push('time')
+  if (!ctx.name) missing.push('name')
+  if (!ctx.phone) missing.push('phone')
+
+  return missing
+}
+
+// ═══════════════════════════════════════════════════════════════
+// METHOD: Update booking context
+// ═══════════════════════════════════════════════════════════════
+
+conversationSchema.methods.updateBookingContext = function (updates) {
+  if (!this.bookingContext) {
+    this.bookingContext = { state: 'none' }
+  }
+
+  Object.assign(this.bookingContext, updates, { lastUpdated: new Date() })
+
+  // If booking just started, set startedAt
+  if (updates.state === 'started' && !this.bookingContext.startedAt) {
+    this.bookingContext.startedAt = new Date()
+  }
+
+  // If booking completed, set completedAt
+  if (updates.state === 'completed' && !this.bookingContext.completedAt) {
+    this.bookingContext.completedAt = new Date()
+  }
+
+  return this
+}
+
+// ═══════════════════════════════════════════════════════════════
+// METHOD: Finalize booking (copy context to booking record)
+// ═══════════════════════════════════════════════════════════════
+
+conversationSchema.methods.finalizeBooking = function () {
+  const ctx = this.bookingContext
+
+  this.booking = {
+    hasBooking: true,
+    package: ctx.package?.name || null,
+    packageId: ctx.package?.type || null,
+    eventDate: ctx.date?.value || null,
+    eventTime: ctx.time?.formatted || null,
+    eventLocation: ctx.location || null,
+    estimatedValue: ctx.package?.price || null,
+    specialRequests: ctx.specialRequests || null,
+    status: 'pending',
+    statusHistory: [{
+      status: 'pending',
+      changedAt: new Date(),
+      changedBy: 'system'
+    }]
+  }
+
+  // Also update visitor info
+  if (ctx.name) this.visitor.name = ctx.name
+  if (ctx.phone) this.visitor.phone = ctx.phone
+  if (ctx.email) this.visitor.email = ctx.email
+  if (ctx.location) this.visitor.location = ctx.location
+
+  this.meta.successful = true
+  this.bookingContext.state = 'completed'
+  this.bookingContext.completedAt = new Date()
+
+  return this
+}
 
 // ═══════════════════════════════════════════════════════════════
 // SCHEMA 2: ANALYTICS
@@ -140,13 +313,13 @@ conversationSchema.index({ createdAt: -1 })
 // ═══════════════════════════════════════════════════════════════
 
 const analyticsSchema = new Schema({
-  date: { 
-    type: String, 
-    required: true, 
+  date: {
+    type: String,
+    required: true,
     unique: true,
-    index: true 
-  }, // Format: YYYY-MM-DD
-  
+    index: true
+  },
+
   // Traffic Metrics
   traffic: {
     uniqueVisitors: { type: Number, default: 0 },
@@ -156,7 +329,7 @@ const analyticsSchema = new Schema({
     bounceRate: { type: Number, default: 0 },
     avgSessionDuration: { type: Number, default: 0 }
   },
-  
+
   // Chat Metrics
   chat: {
     widgetOpened: { type: Number, default: 0 },
@@ -170,7 +343,9 @@ const analyticsSchema = new Schema({
     responseBreakdown: {
       instant: { type: Number, default: 0 },
       pattern: { type: Number, default: 0 },
-      ai: { type: Number, default: 0 }
+      ai: { type: Number, default: 0 },
+      booking: { type: Number, default: 0 },
+      fallback: { type: Number, default: 0 }
     },
     languageBreakdown: {
       en: { type: Number, default: 0 },
@@ -178,7 +353,7 @@ const analyticsSchema = new Schema({
       gu: { type: Number, default: 0 }
     }
   },
-  
+
   // Booking Metrics
   bookings: {
     inquiriesStarted: { type: Number, default: 0 },
@@ -194,7 +369,7 @@ const analyticsSchema = new Schema({
     totalValue: { type: Number, default: 0 },
     avgValue: { type: Number, default: 0 }
   },
-  
+
   // Intent Analytics
   intents: {
     topIntents: [{
@@ -208,7 +383,7 @@ const analyticsSchema = new Schema({
     }],
     failedMatches: { type: Number, default: 0 }
   },
-  
+
   // Device & Source
   sources: {
     devices: {
@@ -227,10 +402,10 @@ const analyticsSchema = new Schema({
     },
     os: { type: Map, of: Number, default: {} }
   },
-  
+
   // Hourly Activity
   hourly: { type: Map, of: { visitors: Number, chats: Number }, default: {} },
-  
+
   // Abuse Metrics
   abuse: {
     flaggedMessages: { type: Number, default: 0 },
@@ -246,7 +421,7 @@ const analyticsSchema = new Schema({
       dismissed: { type: Number, default: 0 }
     }
   },
-  
+
   // Learning Metrics
   learning: {
     patternsUsed: { type: Number, default: 0 },
@@ -264,16 +439,15 @@ const analyticsSchema = new Schema({
 // ═══════════════════════════════════════════════════════════════
 // SCHEMA 3: CONFIG
 // Stores admin settings, packages, patterns, responses
-// Uses fixed _id for each document type
 // ═══════════════════════════════════════════════════════════════
 
 const configSchema = new Schema({
-  _id: { type: String, required: true }, // 'admin', 'packages', 'patterns', 'responses'
+  _id: { type: String, required: true },
   type: { type: String, required: true },
   data: { type: Schema.Types.Mixed, default: {} }
 }, {
   timestamps: true,
-  _id: false // We're setting _id manually
+  _id: false
 })
 
 // ═══════════════════════════════════════════════════════════════
@@ -288,28 +462,25 @@ export const Config = mongoose.model('Config', configSchema)
 // HELPER FUNCTIONS
 // ═══════════════════════════════════════════════════════════════
 
-// Get today's date string
 export const getTodayDateString = () => {
   return new Date().toISOString().split('T')[0]
 }
 
-// Get or create today's analytics document
 export const getOrCreateTodayAnalytics = async () => {
   const today = getTodayDateString()
-  
+
   let analytics = await Analytics.findOne({ date: today })
-  
+
   if (!analytics) {
     analytics = await Analytics.create({ date: today })
   }
-  
+
   return analytics
 }
 
-// Increment analytics counter
 export const incrementAnalytics = async (path, value = 1) => {
   const today = getTodayDateString()
-  
+
   await Analytics.findOneAndUpdate(
     { date: today },
     { $inc: { [path]: value } },
@@ -317,11 +488,85 @@ export const incrementAnalytics = async (path, value = 1) => {
   )
 }
 
+// ═══════════════════════════════════════════════════════════════
+// BOOKING STATE CONSTANTS (Export for use in chat.service.js)
+// ═══════════════════════════════════════════════════════════════
+
+export const BOOKING_STATES = {
+  NONE: 'none',
+  STARTED: 'started',
+  AWAITING_PACKAGE: 'awaiting_package',
+  AWAITING_DATE: 'awaiting_date',
+  AWAITING_TIME: 'awaiting_time',
+  AWAITING_NAME: 'awaiting_name',
+  AWAITING_PHONE: 'awaiting_phone',
+  AWAITING_EMAIL: 'awaiting_email',
+  AWAITING_LOCATION: 'awaiting_location',
+  CONFIRMING: 'confirming',
+  COMPLETED: 'completed',
+  CANCELLED: 'cancelled'
+}
+
+// ═══════════════════════════════════════════════════════════════
+// PACKAGES CONSTANT (Export for use throughout app)
+// ═══════════════════════════════════════════════════════════════
+
+export const PACKAGES = {
+  portrait: {
+    type: 'portrait',
+    name: 'Portrait Session',
+    price: 25000,
+    emoji: '📷',
+    description: 'Professional portrait photography session'
+  },
+  wedding: {
+    type: 'wedding',
+    name: 'Wedding Package',
+    price: 75000,
+    emoji: '💒',
+    description: 'Complete wedding day coverage'
+  },
+  prewedding: {
+    type: 'prewedding',
+    name: 'Pre-Wedding Shoot',
+    price: 35000,
+    emoji: '💑',
+    description: 'Romantic pre-wedding photoshoot'
+  },
+  event: {
+    type: 'event',
+    name: 'Event Coverage',
+    price: 50000,
+    emoji: '🎉',
+    description: 'Corporate & personal event coverage'
+  },
+  maternity: {
+    type: 'maternity',
+    name: 'Maternity Shoot',
+    price: 20000,
+    emoji: '🤰',
+    description: 'Beautiful maternity photography'
+  },
+  baby: {
+    type: 'baby',
+    name: 'Baby Shoot',
+    price: 15000,
+    emoji: '👶',
+    description: 'Newborn & baby photography'
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// DEFAULT EXPORT
+// ═══════════════════════════════════════════════════════════════
+
 export default {
   Conversation,
   Analytics,
   Config,
   getTodayDateString,
   getOrCreateTodayAnalytics,
-  incrementAnalytics
+  incrementAnalytics,
+  BOOKING_STATES,
+  PACKAGES
 }

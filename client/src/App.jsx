@@ -1,6 +1,7 @@
 import React, { useEffect, useState, lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import Lenis from '@studio-freight/lenis'
+import { ChatProvider } from './context/ChatContext'
 
 // Lazy load pages for better performance
 const Home = lazy(() => import('./pages/Home'))
@@ -71,14 +72,14 @@ function App() {
 
       // Check device memory (if available)
       const memory = navigator.deviceMemory || 4
-      
+
       // Check hardware concurrency (CPU cores)
       const cores = navigator.hardwareConcurrency || 4
-      
+
       // Check connection type
       const connection = navigator.connection || {}
       const slowConnection = connection.effectiveType === '2g' || connection.effectiveType === 'slow-2g'
-      
+
       // Determine tier
       if (memory <= 2 || cores <= 2 || slowConnection) {
         setPerformanceTier('low')
@@ -109,16 +110,18 @@ function App() {
 
   return (
     <PerformanceContext.Provider value={performanceValue}>
-      <BrowserRouter>
-        <Suspense fallback={<PageLoader />}>
-          <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/admin" element={<Admin />} />
-            <Route path="/admin/*" element={<Admin />} />
-            <Route path="*" element={<Home />} />
-          </Routes>
-        </Suspense>
-      </BrowserRouter>
+      <ChatProvider>
+        <BrowserRouter>
+          <Suspense fallback={<PageLoader />}>
+            <Routes>
+              <Route path="/" element={<Home />} />
+              <Route path="/admin" element={<Admin />} />
+              <Route path="/admin/*" element={<Admin />} />
+              <Route path="*" element={<Home />} />
+            </Routes>
+          </Suspense>
+        </BrowserRouter>
+      </ChatProvider>
     </PerformanceContext.Provider>
   )
 }

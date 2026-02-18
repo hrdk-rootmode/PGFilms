@@ -14,9 +14,9 @@ const router = express.Router()
 router.get('/packages', async (req, res) => {
   try {
     const packagesConfig = await Config.findOne({ _id: 'packages' })
-    
+
     const packages = (packagesConfig?.data || [])
-      .filter(p => p.active)
+      .filter(p => p.isActive !== false)
       .sort((a, b) => (a.order || 0) - (b.order || 0))
       .map(p => ({
         id: p.id,
@@ -27,8 +27,18 @@ router.get('/packages', async (req, res) => {
         features: p.features,
         description: p.description,
         emoji: p.emoji,
-        popular: p.popular
+        image: p.image,
+        popular: p.popular,
+        isActive: p.isActive
       }))
+
+    console.log('🌐 Public API - Packages filtered:', packages.length)
+    console.log('🌐 Public API - Package details:', packages.map(p => ({
+      id: p.id,
+      name: p.name,
+      price: p.price,
+      isActive: p.isActive
+    })))
 
     res.json({
       success: true,
@@ -50,7 +60,7 @@ router.get('/packages', async (req, res) => {
 router.get('/info', async (req, res) => {
   try {
     const adminConfig = await Config.findOne({ _id: 'admin' })
-    
+
     const profile = adminConfig?.data?.profile || {}
     const business = adminConfig?.data?.business || {}
 
@@ -68,7 +78,9 @@ router.get('/info', async (req, res) => {
           start: business.hoursStart || '09:00',
           end: business.hoursEnd || '21:00'
         },
-        languages: business.supportedLanguages || ['en', 'hi', 'gu']
+        languages: business.supportedLanguages || ['en', 'hi', 'gu'],
+        heroImage: adminConfig?.data?.images?.hero || null,
+        aboutImage: adminConfig?.data?.images?.about || null
       }
     })
   } catch (error) {
@@ -88,7 +100,7 @@ router.get('/portfolio', async (req, res) => {
   try {
     // TODO: Connect to Instagram API
     // For now, return placeholder data
-    
+
     const portfolio = [
       { id: 1, category: 'wedding', src: 'https://images.unsplash.com/photo-1519741497674-611481863552?w=800', alt: 'Wedding' },
       { id: 2, category: 'portrait', src: 'https://images.unsplash.com/photo-1531746020798-e6953c6e8e04?w=800', alt: 'Portrait' },
