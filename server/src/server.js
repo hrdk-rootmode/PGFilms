@@ -10,6 +10,8 @@ import morgan from 'morgan'
 import rateLimit from 'express-rate-limit'
 import dotenv from 'dotenv'
 import cron from 'node-cron'
+import automationRoutes from './routes/automation.routes.js'
+import { sendDailyBriefingEmail } from './services/email.service.js'
 
 // Load environment variables
 dotenv.config()
@@ -18,7 +20,9 @@ dotenv.config()
 import publicRoutes from './routes/public.routes.js'
 import chatRoutes from './routes/chat.routes.js'
 import adminRoutes from './routes/admin.routes.js'
+import adminAIRoutes from './routes/admin.ai.routes.js'
 import uploadRoutes from './routes/upload.routes.js'
+import aiRoutes from './routes/ai.routes.js'
 
 // Import services for cron jobs
 import { runDailyCleanup, runAnalyticsAggregation } from './services/admin.service.js'
@@ -36,13 +40,7 @@ const PORT = process.env.PORT || 5000
 // ═══════════════════════════════════════════════════════════════
 // MIDDLEWARE
 // ═══════════════════════════════════════════════════════════════
-
-// Security headers
-app.use(helmet({
-  crossOriginResourcePolicy: { policy: "cross-origin" }
-}))
-
-// CORS configuration
+// CORS configuration - More permissive for development
 app.use(cors({
   origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps or curl requests)
@@ -59,6 +57,11 @@ app.use(cors({
       'http://127.0.0.1:5000'
     ]
     
+    // For development, allow all localhost origins
+    if (process.env.NODE_ENV !== 'production') {
+      return callback(null, true)
+    }
+    
     if (allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true)
     } else {
@@ -67,9 +70,20 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Client-Version'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Client-Version', 'X-Requested-With', 'Accept', 'Origin', 'X-API-Key'],
   exposedHeaders: ['X-Total-Count'],
   maxAge: 86400 // 24 hours
+}))
+
+// Handle preflight requests
+app.options('*', cors())
+
+// Automation routes (AI Assistant) - moved after CORS middleware
+app.use('/api/automation', automationRoutes)
+
+// Security headers
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" }
 }))
 
 // Request logging
@@ -98,6 +112,35 @@ const generalLimiter = rateLimit({
   legacyHeaders: false
 })
 
+cron.schedule('0 8 * * *', async () => {
+  console.log('📧 Sending daily briefing email...')
+  try {
+    await sendDailyBriefingEmail()
+    console.log('✅ Daily briefing email sent')
+  } catch (error) {
+    console.error('❌ Daily briefing email failed:', error.message)
+  }
+}, {
+  timezone: process.env.TIMEZONE || 'Asia/Kolkata'
+})
+
+// Weekly summary - Monday 9:00 AM
+cron.schedule('0 9 * * 1', async () => {
+  console.log('📧 Sending weekly summary email...')
+  try {
+    // Import function when needed
+    const { sendWeeklySummaryEmail } = await import('./services/email.service.js')
+    await sendWeeklySummaryEmail()
+    console.log('✅ Weekly summary email sent')
+  } catch (error) {
+    console.error('❌ Weekly summary email failed:', error.message)
+  }
+}, {
+  timezone: process.env.TIMEZONE || 'Asia/Kolkata'
+})
+
+console.log('⏰ Automation cron jobs scheduled')
+
 // Rate limiting - Chat (more lenient)
 const chatLimiter = rateLimit({
   windowMs: 1 * 60 * 1000, // 1 minute
@@ -124,6 +167,7 @@ const adminLimiter = rateLimit({
 app.use('/api/public', generalLimiter)
 app.use('/api/chat', chatLimiter)
 app.use('/api/admin', adminLimiter)
+app.use('/api/automation', generalLimiter)
 
 // ═══════════════════════════════════════════════════════════════
 // ROUTES
@@ -142,7 +186,9 @@ app.get('/health', (req, res) => {
 app.use('/api/public', publicRoutes)
 app.use('/api/chat', chatRoutes)
 app.use('/api/admin', adminRoutes)
+app.use('/api/admin', adminAIRoutes)
 app.use('/api/admin/upload', uploadRoutes)
+app.use('/api/ai', aiRoutes)
 
 // Root route
 app.get('/', (req, res) => {

@@ -1,3 +1,10 @@
 .env
 node_modules
 dist
+
+admin-dashboard*.js
+admin-dashboard*.css
+*.node_modules
+*.md 
+test*.html
+*.html

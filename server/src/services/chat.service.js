@@ -11,12 +11,7 @@ import {
   BOOKING_STATES,
   PACKAGES
 } from '../models/index.js'
-import {
-  getChatResponse,
-  extractBookingDetailsAI,
-  AI_ERROR_TYPES,
-  getAIStatus
-} from './ai.service.js'
+import aiService from './ai.service.js'
 import {
   detectLanguage,
   sendBookingNotification,
@@ -274,7 +269,7 @@ const extractBookingDetails = async (message, context = {}, lastAskedField = nul
   console.log('🔍 Extracting booking details... lastAskedField:', lastAskedField)
 
   // Try AI first
-  const aiResult = await extractBookingDetailsAI(message, context)
+  const aiResult = await aiService.extractBookingDetailsAI(message, context)
   if (aiResult.success && aiResult.data) {
     console.log('✅ AI extraction successful')
     return { ...aiResult.data, extractionMethod: 'ai' }
@@ -964,7 +959,7 @@ export const processMessage = async (sessionId, message, metadata = {}) => {
       // Try AI for general chat
       console.log('📌 Using AI for general response...')
       try {
-        const aiResult = await getChatResponse(message, {
+        const aiResult = await aiService.getChatResponse(message, {
           language: detectedLanguage,
           conversationHistory: conversation.messages.slice(-5).map(m => `${m.role}: ${m.text}`).join('\n')
         })

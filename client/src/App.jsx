@@ -2,6 +2,7 @@ import React, { useEffect, useState, lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import Lenis from '@studio-freight/lenis'
 import { ChatProvider } from './context/ChatContext'
+import { NotificationProvider } from './components/NotificationSystem'
 
 // Lazy load pages for better performance
 const Home = lazy(() => import('./pages/Home'))
@@ -22,7 +23,7 @@ const PageLoader = () => (
 )
 
 // Performance context for device detection
-export const PerformanceContext = React.createContext({
+const PerformanceContext = React.createContext({
   tier: 'high', // 'low', 'medium', 'high'
   enable3D: true,
   enableAnimations: true
@@ -110,18 +111,20 @@ function App() {
 
   return (
     <PerformanceContext.Provider value={performanceValue}>
-      <ChatProvider>
-        <BrowserRouter>
-          <Suspense fallback={<PageLoader />}>
-            <Routes>
-              <Route path="/" element={<Home />} />
-              <Route path="/admin" element={<Admin />} />
-              <Route path="/admin/*" element={<Admin />} />
-              <Route path="*" element={<Home />} />
-            </Routes>
-          </Suspense>
-        </BrowserRouter>
-      </ChatProvider>
+      <NotificationProvider>
+        <ChatProvider>
+          <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+            <Suspense fallback={<PageLoader />}>
+              <Routes>
+                <Route path="/" element={<Home />} />
+                <Route path="/admin" element={<Admin />} />
+                <Route path="/admin/*" element={<Admin />} />
+                <Route path="*" element={<Home />} />
+              </Routes>
+            </Suspense>
+          </BrowserRouter>
+        </ChatProvider>
+      </NotificationProvider>
     </PerformanceContext.Provider>
   )
 }

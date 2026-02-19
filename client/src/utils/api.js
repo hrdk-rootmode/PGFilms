@@ -14,7 +14,8 @@ const api = axios.create({
     'Content-Type': 'application/json',
     'Accept': 'application/json',
     'X-Requested-With': 'XMLHttpRequest'
-  }
+  },
+  withCredentials: true
 })
 
 // Debug: Log API configuration
@@ -272,6 +273,48 @@ export const adminAPI = {
 
   verifyOTP: (otp, action) =>
     api.post('/admin/otp/verify', { otp, action }),
+
+
+// ─────────────────────────────────────────────────────────────
+// Automation & AI Assistant
+// ─────────────────────────────────────────────────────────────
+
+// Daily Briefing
+getDailyBriefing: () =>
+  api.get('/automation/briefing'),
+
+// AI Insights
+getAIInsights: () =>
+  api.get('/automation/insights'),
+
+// Smart Task Suggestions
+getTaskSuggestions: () =>
+  api.get('/automation/task-suggestions'),
+
+// Activity Feed
+getActivityFeed: (limit = 20) =>
+  api.get('/automation/activity-feed', { params: { limit } }),
+
+// Chart Data
+getChartData: (type = 'bookings', days = 30) =>
+  api.get('/automation/chart-data', { params: { type, days } }),
+
+// Growth Metrics
+getGrowthMetrics: () =>
+  api.get('/automation/growth-metrics'),
+
+// ─────────────────────────────────────────────────────────────
+// Email Preferences
+// ─────────────────────────────────────────────────────────────
+
+getEmailPreferences: () =>
+  api.get('/automation/email-preferences'),
+
+updateEmailPreferences: (preferences) =>
+  api.put('/automation/email-preferences', preferences),
+
+sendTestEmail: () =>
+  api.post('/automation/test-email'),
 
   // ─────────────────────────────────────────────────────────────
   // UPLOADS

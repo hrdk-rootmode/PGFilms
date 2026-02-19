@@ -10,6 +10,7 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     minify: 'terser',
+    sourcemap: true,
     rollupOptions: {
       output: {
         manualChunks: {
@@ -21,6 +22,9 @@ export default defineConfig({
     }
   },
   optimizeDeps: {
-    include: ['react', 'react-dom', 'three']
+    include: ['react', 'react-dom', 'three', 'framer-motion', 'lucide-react']
+  },
+  define: {
+    'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV || 'development')
   }
 })

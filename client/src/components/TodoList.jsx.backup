@@ -32,6 +32,7 @@ import {
   FolderPlus,
   FileText,
   ChevronRight,
+  ChevronDown as ChevronDownIcon,
   Calendar as CalendarViewIcon
 } from 'lucide-react'
 import SmartSuggestions from './SmartSuggestions'
@@ -147,40 +148,77 @@ const TodoList = ({ darkMode, onTaskUpdate, onTaskSelect }) => {
     saveTodos(updatedTodos)
   }
 
-  const addTask = (newTask) => {
-    const updatedTodos = [newTask, ...todos]
-    saveTodos(updatedTodos)
-  }
-
-  const updateTask = (updatedTask) => {
-    const updatedTodos = todos.map(todo =>
-      todo.id === updatedTask.id ? updatedTask : todo
-    )
-    saveTodos(updatedTodos)
-  }
-
-  // Filter and sort todos
-  const filteredAndSortedTodos = todos.filter(todo => {
-    const matchesFilter = filter === 'all' || todo.status === filter || todo.priority === filter
-    const matchesSearch = todo.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                        todo.description?.toLowerCase().includes(searchTerm.toLowerCase())
-    return matchesFilter && matchesSearch
-  }).sort((a, b) => {
-    if (sortBy === 'priority') {
-      const priorityOrder = { high: 0, medium: 1, low: 2 }
-      return priorityOrder[a.priority] - priorityOrder[b.priority]
-    } else if (sortBy === 'dueDate') {
-      return new Date(a.dueDate) - new Date(b.dueDate)
+  const addAISuggestion = (suggestion) => {
+    const newTask = {
+      id: Date.now(),
+      title: suggestion.title,
+      description: `AI-suggested task for ${suggestion.category}`,
+      category: suggestion.category,
+      priority: suggestion.priority,
+      status: 'pending',
+      dueDate: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      estimatedTime: suggestion.estimatedTime,
+      reminder: true,
+      aiSuggested: true,
+      createdAt: new Date().toISOString()
     }
-    return 0
-  })
+    const updatedTodos = [...todos, newTask]
+    saveTodos(updatedTodos)
+    setShowAISuggestions(false)
+    generateAISuggestions()
+  }
 
-  // Calculate statistics
+  const getPriorityColor = (priority) => {
+    switch (priority) {
+      case 'high': return 'bg-red-100 text-red-800 border-red-200'
+      case 'medium': return 'bg-yellow-100 text-yellow-800 border-yellow-200'
+      case 'low': return 'bg-green-100 text-green-800 border-green-200'
+      default: return 'bg-gray-100 text-gray-800 border-gray-200'
+    }
+  }
+
+  const getCategoryIcon = (category) => {
+    switch (category) {
+      case 'editing': return <Camera className="w-4 h-4" />
+      case 'meeting': return <Users className="w-4 h-4" />
+      case 'backup': return <Target className="w-4 h-4" />
+      case 'communication': return <Phone className="w-4 h-4" />
+      case 'marketing': return <TrendingUp className="w-4 h-4" />
+      case 'maintenance': return <Zap className="w-4 h-4" />
+      default: return <Calendar className="w-4 h-4" />
+    }
+  }
+
+  const getStatusIcon = (status) => {
+    switch (status) {
+      case 'completed': return <Check className="w-4 h-4 text-green-500" />
+      case 'in_progress': return <Clock className="w-4 h-4 text-blue-500" />
+      default: return <AlertCircle className="w-4 h-4 text-yellow-500" />
+    }
+  }
+
+  const filteredAndSortedTodos = todos
+    .filter(todo => {
+      const matchesFilter = filter === 'all' || todo.status === filter || todo.priority === filter
+      const matchesSearch = todo.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                           todo.description.toLowerCase().includes(searchTerm.toLowerCase())
+      return matchesFilter && matchesSearch
+    })
+    .sort((a, b) => {
+      if (sortBy === 'priority') {
+        const priorityOrder = { high: 0, medium: 1, low: 2 }
+        return priorityOrder[a.priority] - priorityOrder[b.priority]
+      } else if (sortBy === 'dueDate') {
+        return new Date(a.dueDate) - new Date(b.dueDate)
+      }
+      return 0
+    })
+
   const stats = {
     total: todos.length,
+    completed: todos.filter(t => t.status === 'completed').length,
     pending: todos.filter(t => t.status === 'pending').length,
     inProgress: todos.filter(t => t.status === 'in_progress').length,
-    completed: todos.filter(t => t.status === 'completed').length,
     highPriority: todos.filter(t => t.priority === 'high' && t.status !== 'completed').length
   }
 
@@ -300,7 +338,7 @@ const TodoList = ({ darkMode, onTaskUpdate, onTaskSelect }) => {
               title={expandedProjects.has(todo.id) ? 'Collapse' : 'Expand'}
             >
               {expandedProjects.has(todo.id) ? (
-                <ChevronDown className="w-4 h-4" />
+                <ChevronDownIcon className="w-4 h-4" />
               ) : (
                 <ChevronRight className="w-4 h-4" />
               )}
@@ -330,7 +368,7 @@ const TodoList = ({ darkMode, onTaskUpdate, onTaskSelect }) => {
   return (
     <div className="space-y-6">
       {/* Simplified Header */}
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
           <h2 className={`text-xl font-semibold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
             Task Management
@@ -350,8 +388,8 @@ const TodoList = ({ darkMode, onTaskUpdate, onTaskSelect }) => {
             onClick={() => setShowSmartSuggestions(!showSmartSuggestions)}
             className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border ${
               showSmartSuggestions 
-                ? 'bg-purple-100 text-purple-700 border-purple-200' 
-                : 'bg-white text-gray-600 border-gray-300'
+                ? 'bg-purple-100 text-purple-700 border-purple-200 dark:bg-purple-900/30 dark:text-purple-400 dark:border-purple-800'
+                : 'bg-white text-gray-600 border-gray-300 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-700'
             } transition-colors text-sm`}
           >
             <Lightbulb className="w-4 h-4" />
@@ -364,23 +402,22 @@ const TodoList = ({ darkMode, onTaskUpdate, onTaskSelect }) => {
       <AnimatePresence>
         {showSmartSuggestions && (
           <motion.div
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            className="mb-6"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="overflow-hidden"
           >
-            <SmartSuggestions
+            <SmartSuggestions 
               darkMode={darkMode} 
               onAddTask={(newTask) => {
                 setTodos(prev => [newTask, ...prev])
-                setShowSmartSuggestions(false)
               }}
               onClose={() => setShowSmartSuggestions(false)}
             />
           </motion.div>
         )}
       </AnimatePresence>
-      
+
       {/* View Toggle */}
       <div className="flex justify-between items-center">
         <div className="flex gap-2">
@@ -443,37 +480,39 @@ const TodoList = ({ darkMode, onTaskUpdate, onTaskSelect }) => {
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className={`w-full pl-10 pr-4 py-2 rounded-lg border ${
-              darkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300'
+              darkMode ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-300'
             } focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm`}
           />
         </div>
         
-        <select
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          className={`px-3 py-2 rounded-lg border text-sm ${
-            darkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300'
-          } focus:outline-none focus:ring-2 focus:ring-blue-500`}
-        >
-          <option value="all">All Tasks</option>
-          <option value="pending">Pending</option>
-          <option value="in_progress">In Progress</option>
-          <option value="completed">Completed</option>
-          <option value="high">High Priority</option>
-          <option value="medium">Medium Priority</option>
-          <option value="low">Low Priority</option>
-        </select>
-        
-        <select
-          value={sortBy}
-          onChange={(e) => setSortBy(e.target.value)}
-          className={`px-3 py-2 rounded-lg border text-sm ${
-            darkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300'
-          } focus:outline-none focus:ring-2 focus:ring-blue-500`}
-        >
-          <option value="priority">Sort by Priority</option>
-          <option value="dueDate">Sort by Due Date</option>
-        </select>
+        <div className="flex gap-2">
+          <select
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            className={`px-3 py-2 rounded-lg border text-sm ${
+              darkMode ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-300'
+            } focus:outline-none focus:ring-2 focus:ring-blue-500`}
+          >
+            <option value="all">All Tasks</option>
+            <option value="pending">Pending</option>
+            <option value="in_progress">In Progress</option>
+            <option value="completed">Completed</option>
+            <option value="high">High Priority</option>
+            <option value="medium">Medium Priority</option>
+            <option value="low">Low Priority</option>
+          </select>
+
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value)}
+            className={`px-3 py-2 rounded-lg border text-sm ${
+              darkMode ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-300'
+            } focus:outline-none focus:ring-2 focus:ring-blue-500`}
+          >
+            <option value="priority">Sort by Priority</option>
+            <option value="dueDate">Sort by Due Date</option>
+          </select>
+        </div>
       </div>
 
       {/* Todo Form */}

@@ -1,257 +1,262 @@
-// ═══════════════════════════════════════════════════════════════
-// PG FILMMAKER - AI Service (Gemini Integration)
-// VERSION: 2.0 - Robust Hybrid Fallback System
-// ═══════════════════════════════════════════════════════════════
+import axios from 'axios';
 
-// ═══════════════════════════════════════════════════════════════
-// CONFIGURATION
-// ═══════════════════════════════════════════════════════════════
+class AIService {
+  constructor() {
+    this.apiKey = process.env.GEMINI_API_KEY;
+    this.apiUrl = 'https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent';
+  }
 
-const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent'
+  async generateTodoTemplates(topic, processType) {
+    if (!this.apiKey) {
+      throw new Error('Gemini API key not configured');
+    }
 
-// Error types for proper handling
-export const AI_ERROR_TYPES = {
-  QUOTA_EXCEEDED: 'QUOTA_EXCEEDED',
-  TIMEOUT: 'TIMEOUT',
-  SAFETY_BLOCKED: 'SAFETY_BLOCKED',
-  INVALID_RESPONSE: 'INVALID_RESPONSE',
-  NETWORK_ERROR: 'NETWORK_ERROR',
-  API_KEY_MISSING: 'API_KEY_MISSING',
-  UNKNOWN: 'UNKNOWN'
-}
+    const prompt = this.buildPrompt(topic, processType);
+    
+    try {
+      const response = await axios.post(
+        `${this.apiUrl}?key=${this.apiKey}`,
+        {
+          contents: [{
+            parts: [{
+              text: prompt
+            }]
+          }]
+        },
+        {
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        }
+      );
 
-// Track AI availability status
-let aiStatus = {
-  isAvailable: true,
-  lastError: null,
-  lastErrorTime: null,
-  consecutiveFailures: 0,
-  cooldownUntil: null
-}
+      const content = response.data.candidates[0].content.parts[0].text;
+      return this.parseResponse(content, processType);
+    } catch (error) {
+      console.error('Error generating AI templates:', error);
+      throw new Error('Failed to generate AI templates');
+    }
+  }
 
-// Abuse word lists (expandable)
-const ABUSE_WORDS = {
-  profanity: [
-    'fuck', 'shit', 'ass', 'damn', 'bitch', 'bastard',
-    'gaali', 'gandu', 'chutiya', 'madarchod', 'bhenchod',
-    'ગાળ', 'ભડવો', 'गाली', 'भड़वा'
-  ],
-  threats: [
-    'kill', 'die', 'murder', 'attack', 'bomb', 'hurt',
-    'मारूंगा', 'मार डालूंगा', 'મારી નાખીશ'
-  ],
-  spam: [
-    'click here', 'free money', 'lottery', 'winner', 'prize',
-    'earn money fast', 'work from home', 'bitcoin', 'crypto scam'
-  ],
-  insults: [
-    'scam', 'fake', 'cheat', 'fraud', 'liar', 'thief',
-    'idiot', 'stupid', 'dumb', 'fool', 'useless',
-    'बेवकूफ', 'मूर्ख', 'ચોર', 'મૂરખ'
+  buildPrompt(topic, processType) {
+    const basePrompt = `Generate a professional todo list template for: "${topic}"`;
+    
+    if (processType === 'subprocess') {
+      return `${basePrompt}
+
+Please provide 2-3 main tasks with 2-3 subtasks each. Use this exact JSON format:
+
+{
+  "templates": [
+    {
+      "text": "Main task description",
+      "priority": "high|medium|low",
+      "category": "work|personal|health|finance|learning|family",
+      "subtasks": [
+        {
+          "text": "Subtask description"
+        }
+      ]
+    }
   ]
 }
 
-// ═══════════════════════════════════════════════════════════════
-// AI STATUS MANAGEMENT
-// ═══════════════════════════════════════════════════════════════
+Requirements:
+- Each template should be actionable and specific
+- Priorities should be realistic (mix of high, medium, low)
+- Categories should be relevant to the topic
+- Subtasks should be detailed and achievable
+- Return ONLY the JSON, no additional text`;
+    } else {
+      return `${basePrompt}
 
-export const getAIStatus = () => ({ ...aiStatus })
+Please provide 1 comprehensive task template. Use this exact JSON format:
 
-export const resetAIStatus = () => {
-  aiStatus = {
-    isAvailable: true,
-    lastError: null,
-    lastErrorTime: null,
-    consecutiveFailures: 0,
-    cooldownUntil: null
-  }
-  console.log('✅ AI status reset')
+{
+  "templates": [
+    {
+      "text": "Task description",
+      "priority": "high|medium|low",
+      "category": "work|personal|health|finance|learning|family",
+      "subtasks": [
+        {
+          "text": "Subtask description"
+        }
+      ]
+    }
+  ]
 }
 
-const handleAIFailure = (errorType, message = '') => {
-  aiStatus.lastError = errorType
-  aiStatus.lastErrorTime = new Date()
-  aiStatus.consecutiveFailures++
-  
-  // If quota exceeded or too many failures, set cooldown
-  if (errorType === AI_ERROR_TYPES.QUOTA_EXCEEDED || aiStatus.consecutiveFailures >= 3) {
-    const cooldownMinutes = errorType === AI_ERROR_TYPES.QUOTA_EXCEEDED ? 60 : 5
-    aiStatus.cooldownUntil = new Date(Date.now() + cooldownMinutes * 60 * 1000)
-    aiStatus.isAvailable = false
-    console.warn(`⚠️ AI cooldown activated for ${cooldownMinutes} minutes: ${message}`)
-  }
-}
-
-const handleAISuccess = () => {
-  aiStatus.isAvailable = true
-  aiStatus.consecutiveFailures = 0
-  aiStatus.cooldownUntil = null
-}
-
-const isAICoolingDown = () => {
-  if (!aiStatus.cooldownUntil) return false
-  
-  if (new Date() > aiStatus.cooldownUntil) {
-    // Cooldown expired, reset
-    aiStatus.isAvailable = true
-    aiStatus.cooldownUntil = null
-    aiStatus.consecutiveFailures = 0
-    console.log('✅ AI cooldown expired, resuming service')
-    return false
-  }
-  
-  return true
-}
-
-// ═══════════════════════════════════════════════════════════════
-// GEMINI API CALL (with robust error handling)
-// ═══════════════════════════════════════════════════════════════
-
-export const callGemini = async (prompt, options = {}) => {
-  const apiKey = process.env.GEMINI_API_KEY
-  
-  // Check API key
-  if (!apiKey) {
-    console.error('❌ FATAL: GEMINI_API_KEY is missing in .env file')
-    return {
-      success: false,
-      error: AI_ERROR_TYPES.API_KEY_MISSING,
-      data: null
+Requirements:
+- Task should be actionable and specific
+- Priority should be realistic
+- Category should be relevant to the topic
+- Include 2-3 detailed subtasks
+- Return ONLY the JSON, no additional text`;
     }
   }
 
-  // Check if AI is cooling down
-  if (isAICoolingDown()) {
-    const remainingMs = aiStatus.cooldownUntil - new Date()
-    const remainingMins = Math.ceil(remainingMs / 60000)
-    console.log(`⏳ AI cooling down, ${remainingMins} minutes remaining`)
-    return {
-      success: false,
-      error: AI_ERROR_TYPES.QUOTA_EXCEEDED,
-      data: null,
-      cooldownRemaining: remainingMins
+  parseResponse(content, processType) {
+    try {
+      // Extract JSON from response (handle cases where AI includes markdown or additional text)
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        throw new Error('Invalid response format from AI');
+      }
+
+      const parsed = JSON.parse(jsonMatch[0]);
+      
+      // Validate and sanitize the response
+      if (!parsed.templates || !Array.isArray(parsed.templates)) {
+        throw new Error('Invalid template structure');
+      }
+
+      return parsed.templates.map(template => ({
+        text: template.text || 'Untitled Task',
+        priority: this.validatePriority(template.priority),
+        category: this.validateCategory(template.category),
+        subtasks: this.validateSubtasks(template.subtasks)
+      }));
+    } catch (error) {
+      console.error('Error parsing AI response:', error);
+      throw new Error('Failed to parse AI response');
     }
   }
 
-  try {
-    console.log('🤖 Sending request to Gemini...')
+  validatePriority(priority) {
+    const validPriorities = ['high', 'medium', 'low'];
+    return validPriorities.includes(priority) ? priority : 'medium';
+  }
+
+  validateCategory(category) {
+    const validCategories = ['work', 'personal', 'health', 'finance', 'learning', 'family'];
+    return validCategories.includes(category) ? category : 'work';
+  }
+
+  validateSubtasks(subtasks) {
+    if (!Array.isArray(subtasks)) return [];
     
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 15000) // 15s timeout
+    return subtasks
+      .filter(st => st && st.text && st.text.trim())
+      .map(st => ({ text: st.text.trim() }))
+      .slice(0, 5); // Limit to 5 subtasks max
+  }
 
-    const response = await fetch(`${GEMINI_API_URL}?key=${apiKey}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      signal: controller.signal,
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: options.temperature || 0.7,
-          maxOutputTokens: options.maxTokens || 500,
-          topP: 0.9,
-          topK: 40
+  async analyzeTaskComplexity(taskText) {
+    if (!this.apiKey) {
+      return { complexity: 'medium', estimatedTime: '2 hours' };
+    }
+
+    const prompt = `Analyze this task for complexity and time estimation:
+
+Task: "${taskText}"
+
+Provide analysis in this JSON format:
+{
+  "complexity": "simple|medium|complex",
+  "estimatedTime": "time estimate",
+  "breakdown": ["key steps"],
+  "recommendations": "suggestions"
+}
+
+Return ONLY the JSON.`;
+
+    try {
+      const response = await axios.post(
+        `${this.apiUrl}?key=${this.apiKey}`,
+        {
+          contents: [{
+            parts: [{
+              text: prompt
+            }]
+          }]
         },
-        safetySettings: [
-          { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_MEDIUM_AND_ABOVE' },
-          { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_MEDIUM_AND_ABOVE' },
-          { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_MEDIUM_AND_ABOVE' },
-          { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_MEDIUM_AND_ABOVE' }
-        ]
-      })
-    })
-
-    clearTimeout(timeout)
-
-    const data = await response.json()
-
-    // Handle HTTP errors
-    if (!response.ok) {
-      console.error('❌ Gemini API Error:', response.status, JSON.stringify(data, null, 2))
-      
-      // Specifically handle 429 (quota exceeded)
-      if (response.status === 429) {
-        handleAIFailure(AI_ERROR_TYPES.QUOTA_EXCEEDED, 'Rate limit exceeded')
-        return {
-          success: false,
-          error: AI_ERROR_TYPES.QUOTA_EXCEEDED,
-          data: null
+        {
+          headers: {
+            'Content-Type': 'application/json'
+          }
         }
-      }
-      
-      // Handle other errors
-      handleAIFailure(AI_ERROR_TYPES.UNKNOWN, `HTTP ${response.status}`)
-      return {
-        success: false,
-        error: AI_ERROR_TYPES.UNKNOWN,
-        data: null
-      }
-    }
+      );
 
-    // Parse response
-    if (data.candidates && data.candidates.length > 0) {
-      const candidate = data.candidates[0]
+      const content = response.data.candidates[0].content.parts[0].text;
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
       
-      // Check for blocked content
-      if (candidate.finishReason === 'SAFETY') {
-        console.warn('⚠️ Gemini blocked response due to safety')
-        return {
-          success: false,
-          error: AI_ERROR_TYPES.SAFETY_BLOCKED,
-          data: null
-        }
+      if (jsonMatch) {
+        return JSON.parse(jsonMatch[0]);
       }
       
-      const text = candidate.content?.parts?.[0]?.text?.trim()
-      if (text) {
-        console.log('✅ Gemini Response:', text.substring(0, 100) + '...')
-        handleAISuccess()
-        return {
-          success: true,
-          error: null,
-          data: text
-        }
-      }
-    }
-    
-    console.warn('⚠️ Gemini returned no valid response:', data)
-    handleAIFailure(AI_ERROR_TYPES.INVALID_RESPONSE, 'No valid content')
-    return {
-      success: false,
-      error: AI_ERROR_TYPES.INVALID_RESPONSE,
-      data: null
-    }
-
-  } catch (error) {
-    if (error.name === 'AbortError') {
-      console.error('❌ Gemini API timeout (15s)')
-      handleAIFailure(AI_ERROR_TYPES.TIMEOUT, 'Request timed out')
-      return {
-        success: false,
-        error: AI_ERROR_TYPES.TIMEOUT,
-        data: null
-      }
-    }
-    
-    console.error('❌ Network/Server Error calling Gemini:', error.message)
-    handleAIFailure(AI_ERROR_TYPES.NETWORK_ERROR, error.message)
-    return {
-      success: false,
-      error: AI_ERROR_TYPES.NETWORK_ERROR,
-      data: null
+      return { complexity: 'medium', estimatedTime: '2 hours' };
+    } catch (error) {
+      console.error('Error analyzing task complexity:', error);
+      return { complexity: 'medium', estimatedTime: '2 hours' };
     }
   }
+
+  async generateTaskSuggestions(category, priority) {
+    if (!this.apiKey) {
+      return [];
+    }
+
+    const prompt = `Generate 3-5 task suggestions for category: "${category}" with priority: "${priority}".
+
+Use this JSON format:
+{
+  "suggestions": [
+    {
+      "text": "Task suggestion",
+      "subtasks": ["subtask 1", "subtask 2"]
+    }
+  ]
 }
 
-// ═══════════════════════════════════════════════════════════════
-// SMART BOOKING DATA EXTRACTION (AI-Powered)
-// ═══════════════════════════════════════════════════════════════
+Return ONLY JSON.`;
 
-export const extractBookingDetailsAI = async (message, context = {}) => {
-  const currentDate = new Date()
-  const currentDateStr = currentDate.toISOString().split('T')[0]
-  const currentDay = currentDate.toLocaleDateString('en-US', { weekday: 'long' })
-  
-  const prompt = `You are a professional booking assistant for a photography business.
+    try {
+      const response = await axios.post(
+        `${this.apiUrl}?key=${this.apiKey}`,
+        {
+          contents: [{
+            parts: [{
+              text: prompt
+            }]
+          }]
+        },
+        {
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      const content = response.data.candidates[0].content.parts[0].text;
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        return parsed.suggestions || [];
+      }
+      
+      return [];
+    } catch (error) {
+      console.error('Error generating task suggestions:', error);
+      return [];
+    }
+  }
+
+  async extractBookingDetailsAI(message, context = {}) {
+    if (!this.apiKey) {
+      return {
+        success: false,
+        error: 'API_KEY_MISSING',
+        data: null
+      };
+    }
+
+    const currentDate = new Date()
+    const currentDateStr = currentDate.toISOString().split('T')[0]
+    const currentDay = currentDate.toLocaleDateString('en-US', { weekday: 'long' })
+    
+    const prompt = `You are a professional booking assistant for a photography business.
 
 **Current Date & Time:**
 - Today is: ${currentDay}, ${currentDateStr}
@@ -272,7 +277,7 @@ ${JSON.stringify(context, null, 2)}
 "${message}"
 
 **Your Task:**
-Extract booking information from the user's message. Handle natural language, Hinglish, dates like "tomorrow", "next friday", "kal", "parso", etc.
+Extract booking information from user's message. Handle natural language, Hinglish, dates like "tomorrow", "next friday", "kal", "parso", etc.
 
 **Output STRICT JSON format (no extra text, no markdown):**
 {
@@ -290,7 +295,7 @@ Extract booking information from the user's message. Handle natural language, Hi
 
 **Rules:**
 1. If user says "tomorrow", calculate actual date
-2. If user says "next friday", calculate the actual date
+2. If user says "next friday", calculate actual date
 3. Convert "kal" (Hindi) to tomorrow's date
 4. Convert "parso" (Hindi) to day after tomorrow
 5. If time is "morning", use "09:00", "afternoon" = "14:00", "evening" = "17:00"
@@ -300,78 +305,73 @@ Extract booking information from the user's message. Handle natural language, Hi
 9. intent = "cancel" if user wants to stop/exit
 10. confidence should reflect how certain you are (0.9+ for explicit data, 0.5-0.8 for implied)
 
-**Output JSON only:**`
+**Output JSON only:**`;
 
-  try {
-    const result = await callGemini(prompt, { 
-      temperature: 0.1, // Very low for precision
-      maxTokens: 300 
-    })
-    
-    // Check if AI call failed
-    if (!result.success) {
-      console.warn(`⚠️ AI extraction failed: ${result.error}`)
+    try {
+      const response = await axios.post(
+        `${this.apiUrl}?key=${this.apiKey}`,
+        {
+          contents: [{
+            parts: [{
+              text: prompt
+            }]
+          }]
+        },
+        {
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      const content = response.data.candidates[0].content.parts[0].text;
+      
+      // Clean any markdown formatting Gemini might add
+      let cleanJson = content.trim();
+      
+      // Remove ```json and ``` if present
+      if (cleanJson.startsWith('```json')) {
+        cleanJson = cleanJson.replace(/```json\n?/g, '');
+      }
+      if (cleanJson.startsWith('```')) {
+        cleanJson = cleanJson.replace(/```\n?/g, '');
+      }
+      if (cleanJson.endsWith('```')) {
+        cleanJson = cleanJson.replace(/\n?```$/g, '');
+      }
+      
+      const parsed = JSON.parse(cleanJson);
+      
+      return {
+        success: true,
+        error: null,
+        data: parsed
+      };
+      
+    } catch (error) {
+      console.error('❌ AI Extraction Parse Error:', error.message);
       return {
         success: false,
-        error: result.error,
-        data: null,
-        usedFallback: false
-      }
-    }
-
-    // Clean any markdown formatting Gemini might add
-    let cleanJson = result.data.trim()
-    
-    // Remove ```json and ``` if present
-    if (cleanJson.startsWith('```json')) {
-      cleanJson = cleanJson.replace(/```json\n?/g, '')
-    }
-    if (cleanJson.startsWith('```')) {
-      cleanJson = cleanJson.replace(/```\n?/g, '')
-    }
-    if (cleanJson.endsWith('```')) {
-      cleanJson = cleanJson.replace(/\n?```$/g, '')
-    }
-    
-    const parsed = JSON.parse(cleanJson)
-    
-    console.log('✅ AI Extracted:', parsed)
-    return {
-      success: true,
-      error: null,
-      data: parsed,
-      usedFallback: false
-    }
-    
-  } catch (error) {
-    console.error('❌ AI Extraction Parse Error:', error.message)
-    return {
-      success: false,
-      error: AI_ERROR_TYPES.INVALID_RESPONSE,
-      data: null,
-      usedFallback: false
+        error: 'INVALID_RESPONSE',
+        data: null
+      };
     }
   }
-}
 
-// ═══════════════════════════════════════════════════════════════
-// CHAT RESPONSE (General Conversation)
-// ═══════════════════════════════════════════════════════════════
-
-export const getChatResponse = async (userMessage, context = {}) => {
-  const filmmakerName = process.env.FILMMAKER_NAME || 'PG Films'
-  const filmmakerPhone = process.env.FILMMAKER_PHONE || '+91 98765 43210'
-  
-  // Determine response language
-  const langMap = {
-    'en': 'English',
-    'hi': 'Hindi',
-    'gu': 'Gujarati'
-  }
-  const responseLang = langMap[context.language] || 'English'
-  
-  // Build context-aware prompt
-  const prompt = `You are ${filmmakerName}'s friendly AI assistant chatbot for a photography business in Gujarat, India.
+  async getChatResponse(userMessage, context = {}) {
+    const filmmakerName = process.env.FILMMAKER_NAME || 'PG Films';
+    const filmmakerPhone = process.env.FILMMAKER_PHONE || '+91 98765 43210';
+    
+    // Determine response language
+    const langMap = {
+      'en': 'English',
+      'hi': 'Hindi',
+      'gu': 'Gujarati'
+    }
+    const responseLang = langMap[context.language] || 'English';
+    
+    // Build context-aware prompt
+    const prompt = `You are ${filmmakerName}'s friendly AI assistant chatbot for a photography business in Gujarat, India.
 
 **Your Personality:**
 - Professional yet warm and friendly
@@ -408,234 +408,42 @@ ${context.conversationHistory ? `Previous messages: ${context.conversationHistor
 8. If you don't understand, politely ask for clarification
 9. Never make up information not provided above
 
-**Your Response:**`
+**Your Response:**`;
 
-  const result = await callGemini(prompt, {
-    temperature: 0.7,
-    maxTokens: 300
-  })
-  
-  if (result.success && result.data) {
-    return {
-      success: true,
-      data: result.data
-        .replace(/\*\*/g, '')  // Remove markdown bold
-        .replace(/##/g, '')    // Remove headers
-        .replace(/\n{3,}/g, '\n\n') // Limit newlines
-        .trim(),
-      error: null
-    }
-  }
-  
-  return {
-    success: false,
-    data: null,
-    error: result.error
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════
-// ABUSE DETECTION
-// ═══════════════════════════════════════════════════════════════
-
-export const detectAbuse = async (message) => {
-  if (!message || typeof message !== 'string') {
-    return { isAbusive: false }
-  }
-  
-  const lowerMessage = message.toLowerCase().trim()
-  
-  // Check each category
-  for (const [category, words] of Object.entries(ABUSE_WORDS)) {
-    for (const word of words) {
-      if (lowerMessage.includes(word.toLowerCase())) {
-        console.warn(`⚠️ Abuse detected [${category}]: "${word}" in message`)
-        
-        // Determine action based on severity
-        let action = 'mask'
-        if (category === 'threats') {
-          action = 'block'
-        } else if (category === 'profanity' && words.indexOf(word) < 6) {
-          action = 'block'
+    try {
+      const response = await axios.post(
+        `${this.apiUrl}?key=${this.apiKey}`,
+        {
+          contents: [{
+            parts: [{
+              text: prompt
+            }]
+          }]
+        },
+        {
+          headers: {
+            'Content-Type': 'application/json'
+          }
         }
-        
-        return {
-          isAbusive: true,
-          type: category,
-          word: word,
-          action: action,
-          severity: action === 'block' ? 'high' : 'medium'
-        }
-      }
-    }
-  }
-  
-  // Check for spam patterns
-  const spamPatterns = [
-    /(.)\1{5,}/,  // Repeated characters
-    /\b\d{10,}\b/g,  // Long number strings
-    /(https?:\/\/[^\s]+){2,}/g  // Multiple URLs
-  ]
-  
-  for (const pattern of spamPatterns) {
-    if (pattern.test(lowerMessage)) {
+      );
+      
+      const content = response.data.candidates[0].content.parts[0].text;
       return {
-        isAbusive: true,
-        type: 'spam',
-        action: 'warn',
-        severity: 'low'
-      }
+        success: true,
+        data: content
+          .replace(/\*\*/g, '')  // Remove markdown bold
+          .replace(/##/g, '')    // Remove headers
+          .replace(/\n{3,}/g, '\n\n') // Limit newlines
+          .trim()
+      };
+    } catch (error) {
+      return {
+        success: false,
+        data: null,
+        error: error.message
+      };
     }
   }
-  
-  // Check message length
-  if (message.length > 1000) {
-    return {
-      isAbusive: true,
-      type: 'spam',
-      action: 'warn',
-      severity: 'low'
-    }
-  }
-  
-  return { isAbusive: false }
 }
 
-// ═══════════════════════════════════════════════════════════════
-// LANGUAGE DETECTION
-// ═══════════════════════════════════════════════════════════════
-
-export const detectLanguageAI = async (message) => {
-  if (!message) return 'en'
-  
-  // Hindi Unicode range
-  if (/[\u0900-\u097F]/.test(message)) return 'hi'
-  
-  // Gujarati Unicode range
-  if (/[\u0A80-\u0AFF]/.test(message)) return 'gu'
-  
-  // Check for common Gujarati words in Roman script
-  const gujaratiWords = [
-    'kem', 'cho', 'su', 'che', 'nathi', 'haan', 'na', 'tamne', 
-    'mane', 'aapne', 'ketla', 'kyare', 'kya', 'joiye', 'karvu'
-  ]
-  const lowerMsg = message.toLowerCase()
-  if (gujaratiWords.some(w => lowerMsg.includes(w))) {
-    return 'gu'
-  }
-  
-  // Check for common Hindi words in Roman script
-  const hindiWords = [
-    'kya', 'hai', 'haan', 'nahi', 'kitna', 'kab', 'kaise', 
-    'chahiye', 'dijiye', 'batao', 'bolo', 'acha', 'theek'
-  ]
-  if (hindiWords.some(w => lowerMsg.includes(w))) {
-    return 'hi'
-  }
-  
-  return 'en'
-}
-
-// ═══════════════════════════════════════════════════════════════
-// INTENT SUGGESTION
-// ═══════════════════════════════════════════════════════════════
-
-export const suggestIntent = async (message) => {
-  if (!message) return null
-  
-  const lowerMsg = message.toLowerCase()
-  
-  const intentPatterns = [
-    { pattern: /book|reserve|want|need|interest/i, intent: 'booking' },
-    { pattern: /price|cost|rate|charge|kitna|ketla/i, intent: 'showPackages' },
-    { pattern: /portfolio|sample|work|photo|gallery/i, intent: 'showPortfolio' },
-    { pattern: /contact|phone|call|whatsapp|number/i, intent: 'showContact' },
-    { pattern: /available|date|free|slot/i, intent: 'checkAvailability' },
-    { pattern: /thank|thanks|dhanyavad/i, intent: 'thankYou' },
-    { pattern: /hi|hello|hey|namaste/i, intent: 'greeting' }
-  ]
-  
-  for (const { pattern, intent } of intentPatterns) {
-    if (pattern.test(lowerMsg)) {
-      return intent
-    }
-  }
-  
-  return null
-}
-
-// ═══════════════════════════════════════════════════════════════
-// SMART REPLY SUGGESTIONS
-// ═══════════════════════════════════════════════════════════════
-
-export const getSmartReply = async (message, context = {}) => {
-  const lowerMsg = message.toLowerCase()
-  
-  if (/price|package|cost/i.test(lowerMsg)) {
-    return ['Book Now', 'View Portfolio', 'Contact Us']
-  }
-  
-  if (/book|reserve/i.test(lowerMsg)) {
-    return ['Portrait ₹25k', 'Wedding ₹75k', 'Contact Us']
-  }
-  
-  if (/portfolio|sample/i.test(lowerMsg)) {
-    return ['Show Packages', 'Book Now', 'Contact']
-  }
-  
-  return ['Show Packages', 'View Portfolio', 'Book Now', 'Contact']
-}
-
-// ═══════════════════════════════════════════════════════════════
-// SENTIMENT ANALYSIS
-// ═══════════════════════════════════════════════════════════════
-
-export const analyzeSentiment = (message) => {
-  if (!message) return 'neutral'
-  
-  const lowerMsg = message.toLowerCase()
-  
-  const positiveWords = [
-    'great', 'good', 'nice', 'love', 'awesome', 'beautiful', 'perfect',
-    'thanks', 'thank', 'excellent', 'amazing', 'wonderful', 'best',
-    'सुंदर', 'अच्छा', 'बढ़िया', 'સરસ', 'સુંદર', 'મસ્ત'
-  ]
-  
-  const negativeWords = [
-    'bad', 'poor', 'terrible', 'worst', 'hate', 'awful', 'expensive',
-    'slow', 'boring', 'disappointed', 'waste', 'problem',
-    'बुरा', 'खराब', 'ખરાબ', 'મોંઘું'
-  ]
-  
-  let score = 0
-  
-  for (const word of positiveWords) {
-    if (lowerMsg.includes(word)) score++
-  }
-  
-  for (const word of negativeWords) {
-    if (lowerMsg.includes(word)) score--
-  }
-  
-  if (score > 0) return 'positive'
-  if (score < 0) return 'negative'
-  return 'neutral'
-}
-
-// ═══════════════════════════════════════════════════════════════
-// NAMED EXPORTS (for ES modules)
-// ═══════════════════════════════════════════════════════════════
-
-export default {
-  AI_ERROR_TYPES,
-  getAIStatus,
-  resetAIStatus,
-  callGemini,
-  extractBookingDetailsAI,
-  getChatResponse,
-  detectAbuse,
-  detectLanguageAI,
-  suggestIntent,
-  getSmartReply,
-  analyzeSentiment
-}
+export default new AIService();

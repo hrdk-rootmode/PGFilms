@@ -20,6 +20,7 @@ import {
   Filter,
   Search,
   ChevronDown,
+  ChevronRight,
   Lightbulb,
   Zap,
   List,
@@ -31,42 +32,21 @@ import {
   PlusCircle,
   FolderPlus,
   FileText,
-  ChevronRight,
   Calendar as CalendarViewIcon
 } from 'lucide-react'
-import SmartSuggestions from './SmartSuggestions'
-import TodoForm from './TodoForm'
-import Calendar from './Calendar'
 
-const TodoList = ({ darkMode, onTaskUpdate, onTaskSelect }) => {
+const TodoListEnhanced = ({ darkMode, onTaskUpdate, onTaskSelect }) => {
   const [todos, setTodos] = useState([])
-  const [showSmartSuggestions, setShowSmartSuggestions] = useState(false)
   const [filter, setFilter] = useState('all')
   const [searchTerm, setSearchTerm] = useState('')
-  const [showAISuggestions, setShowAISuggestions] = useState(false)
-  const [aiSuggestions, setAiSuggestions] = useState([])
   const [sortBy, setSortBy] = useState('priority')
-  const [showNotifications, setShowNotifications] = useState(true)
   const [showAddForm, setShowAddForm] = useState(false)
   const [editingTask, setEditingTask] = useState(null)
+  const [viewMode, setViewMode] = useState('list')
   const [expandedProjects, setExpandedProjects] = useState(new Set())
-  const [viewMode, setViewMode] = useState('list') // 'list' or 'calendar'
-
-  // AI-powered task suggestions for photographers
-  const photographerTasks = [
-    { title: 'Review and edit today\'s photos', category: 'editing', priority: 'high', estimatedTime: '2 hours' },
-    { title: 'Backup photos to cloud storage', category: 'backup', priority: 'high', estimatedTime: '30 mins' },
-    { title: 'Respond to client inquiries', category: 'communication', priority: 'medium', estimatedTime: '1 hour' },
-    { title: 'Prepare equipment for tomorrow\'s shoot', category: 'preparation', priority: 'high', estimatedTime: '45 mins' },
-    { title: 'Update portfolio with recent work', category: 'marketing', priority: 'low', estimatedTime: '1 hour' },
-    { title: 'Schedule social media posts', category: 'marketing', priority: 'low', estimatedTime: '30 mins' },
-    { title: 'Clean camera lenses and sensors', category: 'maintenance', priority: 'medium', estimatedTime: '20 mins' },
-    { title: 'Follow up with recent clients', category: 'communication', priority: 'medium', estimatedTime: '45 mins' }
-  ]
 
   useEffect(() => {
     loadTodos()
-    generateAISuggestions()
   }, [])
 
   const loadTodos = () => {
@@ -74,15 +54,29 @@ const TodoList = ({ darkMode, onTaskUpdate, onTaskSelect }) => {
     if (savedTodos) {
       setTodos(JSON.parse(savedTodos))
     } else {
-      // Initialize with sample tasks
       const initialTodos = [
         {
           id: 1,
-          title: 'Edit wedding photos - Johnson family',
+          title: 'Wedding Photography Project',
+          description: 'Complete wedding photography project for Johnson family',
+          category: 'project',
+          priority: 'high',
+          status: 'pending',
+          isProject: true,
+          dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+          estimatedTime: '20 hours',
+          client: 'Johnson Family',
+          reminder: true,
+          createdAt: new Date().toISOString()
+        },
+        {
+          id: 2,
+          title: 'Edit wedding photos',
           description: 'Complete editing 200+ photos from weekend wedding shoot',
           category: 'editing',
           priority: 'high',
           status: 'pending',
+          parentId: 1,
           dueDate: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString(),
           estimatedTime: '4 hours',
           client: 'Johnson Family',
@@ -90,25 +84,26 @@ const TodoList = ({ darkMode, onTaskUpdate, onTaskSelect }) => {
           createdAt: new Date().toISOString()
         },
         {
-          id: 2,
-          title: 'Client meeting - Corporate headshots',
-          description: 'Discuss requirements and schedule for corporate photoshoot',
-          category: 'meeting',
-          priority: 'high',
+          id: 3,
+          title: 'Create photo album',
+          description: 'Design and create wedding photo album',
+          category: 'editing',
+          priority: 'medium',
           status: 'pending',
-          dueDate: new Date(Date.now() + 1 * 24 * 60 * 60 * 1000).toISOString(),
-          estimatedTime: '1 hour',
-          client: 'Tech Corp',
-          reminder: true,
+          parentId: 1,
+          dueDate: new Date(Date.now() + 4 * 24 * 60 * 60 * 1000).toISOString(),
+          estimatedTime: '3 hours',
+          client: 'Johnson Family',
+          reminder: false,
           createdAt: new Date().toISOString()
         },
         {
-          id: 3,
-          title: 'Backup this week\'s photos',
-          description: 'Upload all photos from this week to cloud backup',
+          id: 4,
+          title: 'Backup photos to cloud',
+          description: 'Upload all photos to cloud backup',
           category: 'backup',
-          priority: 'medium',
-          status: 'in_progress',
+          priority: 'high',
+          status: 'pending',
           dueDate: new Date().toISOString(),
           estimatedTime: '30 minutes',
           reminder: false,
@@ -120,13 +115,6 @@ const TodoList = ({ darkMode, onTaskUpdate, onTaskSelect }) => {
     }
   }
 
-  const generateAISuggestions = () => {
-    const suggestions = photographerTasks.filter(task => 
-      !todos.some(todo => todo.title.toLowerCase().includes(task.title.toLowerCase()))
-    ).slice(0, 3)
-    setAiSuggestions(suggestions)
-  }
-
   const saveTodos = (updatedTodos) => {
     setTodos(updatedTodos)
     localStorage.setItem('pg-todos', JSON.stringify(updatedTodos))
@@ -134,54 +122,41 @@ const TodoList = ({ darkMode, onTaskUpdate, onTaskSelect }) => {
   }
 
   const toggleTaskStatus = (id) => {
-    const updatedTodos = todos.map(todo =>
-      todo.id === id
-        ? { ...todo, status: todo.status === 'completed' ? 'pending' : 'completed' }
-        : todo
-    )
-    saveTodos(updatedTodos)
-  }
-
-  const deleteTask = (id) => {
-    const updatedTodos = todos.filter(todo => todo.id !== id)
+    const updatedTodos = todos.map(todo => {
+      if (todo.id === id) {
+        const newStatus = todo.status === 'completed' ? 'pending' : 'completed'
+        return { ...todo, status: newStatus }
+      }
+      return todo
+    })
     saveTodos(updatedTodos)
   }
 
   const addTask = (newTask) => {
-    const updatedTodos = [newTask, ...todos]
+    const task = {
+      id: Date.now(),
+      ...newTask,
+      createdAt: new Date().toISOString()
+    }
+    const updatedTodos = [task, ...todos]
     saveTodos(updatedTodos)
+    setShowAddForm(false)
   }
 
   const updateTask = (updatedTask) => {
-    const updatedTodos = todos.map(todo =>
+    const updatedTodos = todos.map(todo => 
       todo.id === updatedTask.id ? updatedTask : todo
     )
     saveTodos(updatedTodos)
+    setEditingTask(null)
   }
 
-  // Filter and sort todos
-  const filteredAndSortedTodos = todos.filter(todo => {
-    const matchesFilter = filter === 'all' || todo.status === filter || todo.priority === filter
-    const matchesSearch = todo.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                        todo.description?.toLowerCase().includes(searchTerm.toLowerCase())
-    return matchesFilter && matchesSearch
-  }).sort((a, b) => {
-    if (sortBy === 'priority') {
-      const priorityOrder = { high: 0, medium: 1, low: 2 }
-      return priorityOrder[a.priority] - priorityOrder[b.priority]
-    } else if (sortBy === 'dueDate') {
-      return new Date(a.dueDate) - new Date(b.dueDate)
-    }
-    return 0
-  })
-
-  // Calculate statistics
-  const stats = {
-    total: todos.length,
-    pending: todos.filter(t => t.status === 'pending').length,
-    inProgress: todos.filter(t => t.status === 'in_progress').length,
-    completed: todos.filter(t => t.status === 'completed').length,
-    highPriority: todos.filter(t => t.priority === 'high' && t.status !== 'completed').length
+  const deleteTask = (id) => {
+    const updatedTodos = todos.filter(todo => todo.id !== id)
+    // Also delete sub-tasks if this is a project
+    const subTasks = todos.filter(todo => todo.parentId === id)
+    const finalTodos = updatedTodos.filter(todo => !subTasks.some(sub => sub.id === todo.id))
+    saveTodos(finalTodos)
   }
 
   const toggleProjectExpansion = (projectId) => {
@@ -200,6 +175,33 @@ const TodoList = ({ darkMode, onTaskUpdate, onTaskSelect }) => {
     return todos.filter(task => task.parentId === parentId)
   }
 
+  const getRootTasks = () => {
+    return todos.filter(task => !task.parentId)
+  }
+
+  const filteredAndSortedTodos = getRootTasks().filter(todo => {
+    const matchesFilter = filter === 'all' || todo.status === filter || todo.priority === filter
+    const matchesSearch = todo.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                        todo.description?.toLowerCase().includes(searchTerm.toLowerCase())
+    return matchesFilter && matchesSearch
+  }).sort((a, b) => {
+    if (sortBy === 'priority') {
+      const priorityOrder = { high: 0, medium: 1, low: 2 }
+      return priorityOrder[a.priority] - priorityOrder[b.priority]
+    } else if (sortBy === 'dueDate') {
+      return new Date(a.dueDate) - new Date(b.dueDate)
+    }
+    return 0
+  })
+
+  const stats = {
+    total: todos.length,
+    pending: todos.filter(t => t.status === 'pending').length,
+    completed: todos.filter(t => t.status === 'completed').length,
+    highPriority: todos.filter(t => t.priority === 'high' && t.status !== 'completed').length,
+    projects: todos.filter(t => t.isProject).length
+  }
+
   const renderTask = (todo, index, isSubTask = false) => (
     <motion.div
       key={todo.id}
@@ -213,16 +215,6 @@ const TodoList = ({ darkMode, onTaskUpdate, onTaskSelect }) => {
       } ${isSubTask ? 'ml-6 border-l-2 border-gray-200 dark:border-gray-600' : ''}`}
     >
       <div className="flex items-center gap-3">
-        {/* Task Type Icon */}
-        <div className="flex-shrink-0">
-          {todo.isProject ? (
-            <FolderPlus className="w-4 h-4 text-blue-500" />
-          ) : (
-            <FileText className="w-4 h-4 text-gray-500" />
-          )}
-        </div>
-
-        {/* Checkbox */}
         <button
           onClick={() => toggleTaskStatus(todo.id)}
           className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
@@ -237,19 +229,18 @@ const TodoList = ({ darkMode, onTaskUpdate, onTaskSelect }) => {
           {todo.status !== 'completed' && <Square className="w-4 h-4" />}
         </button>
 
-        {/* Task Content */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
+            {todo.isProject ? (
+              <FolderPlus className="w-4 h-4 text-blue-500" />
+            ) : (
+              <FileText className="w-4 h-4 text-gray-500" />
+            )}
             <h4 className={`font-medium text-sm truncate ${
               darkMode ? 'text-white' : 'text-gray-900'
             } ${todo.status === 'completed' ? 'line-through opacity-75' : ''}`}>
               {todo.title}
             </h4>
-            {todo.aiSuggested && (
-              <span className="px-1.5 py-0.5 text-xs rounded bg-purple-100 text-purple-700 border border-purple-200">
-                AI
-              </span>
-            )}
             {todo.isProject && (
               <span className="px-1.5 py-0.5 text-xs rounded bg-blue-100 text-blue-700 border border-blue-200">
                 Project
@@ -289,7 +280,6 @@ const TodoList = ({ darkMode, onTaskUpdate, onTaskSelect }) => {
           </div>
         </div>
 
-        {/* Actions */}
         <div className="flex items-center gap-1">
           {todo.isProject && (
             <button
@@ -327,9 +317,207 @@ const TodoList = ({ darkMode, onTaskUpdate, onTaskSelect }) => {
     </motion.div>
   )
 
+  const TaskForm = ({ task, onSave, onCancel }) => {
+    const [formData, setFormData] = useState({
+      title: task?.title || '',
+      description: task?.description || '',
+      category: task?.category || 'editing',
+      priority: task?.priority || 'medium',
+      status: task?.status || 'pending',
+      dueDate: task?.dueDate || '',
+      estimatedTime: task?.estimatedTime || '',
+      client: task?.client || '',
+      reminder: task?.reminder || false,
+      isProject: task?.isProject || false,
+      parentId: task?.parentId || null
+    })
+
+    const handleSubmit = (e) => {
+      e.preventDefault()
+      const newTask = {
+        id: task?.id || Date.now(),
+        ...formData,
+        createdAt: task?.createdAt || new Date().toISOString()
+      }
+      onSave(newTask)
+    }
+
+    return (
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className={`${
+          darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
+        } rounded-lg p-4 border shadow-lg`}
+      >
+        <div className="flex items-center justify-between mb-4">
+          <h3 className={`font-semibold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+            {task ? 'Edit Task' : 'Add New Task'}
+          </h3>
+          <button
+            onClick={onCancel}
+            className={`p-1 rounded transition-colors ${
+              darkMode ? 'hover:bg-gray-700 text-gray-400' : 'hover:bg-gray-100 text-gray-600'
+            }`}
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className={`block text-sm font-medium mb-1 ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+              Task Title *
+            </label>
+            <input
+              type="text"
+              value={formData.title}
+              onChange={(e) => setFormData(prev => ({ ...prev, title: e.target.value }))}
+              className={`w-full px-3 py-2 rounded-lg border ${
+                darkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300'
+              } focus:outline-none focus:ring-2 focus:ring-blue-500`}
+              placeholder="Enter task title"
+              required
+            />
+          </div>
+
+          <div>
+            <label className={`block text-sm font-medium mb-1 ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+              Description
+            </label>
+            <textarea
+              value={formData.description}
+              onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
+              rows={3}
+              className={`w-full px-3 py-2 rounded-lg border ${
+                darkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300'
+              } focus:outline-none focus:ring-2 focus:ring-blue-500`}
+              placeholder="Enter task description"
+            />
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className={`block text-sm font-medium mb-1 ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                Category
+              </label>
+              <select
+                value={formData.category}
+                onChange={(e) => setFormData(prev => ({ ...prev, category: e.target.value }))}
+                className={`w-full px-3 py-2 rounded-lg border ${
+                  darkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300'
+                } focus:outline-none focus:ring-2 focus:ring-blue-500`}
+              >
+                <option value="editing">Editing</option>
+                <option value="shooting">Shooting</option>
+                <option value="meeting">Meeting</option>
+                <option value="backup">Backup</option>
+                <option value="communication">Communication</option>
+                <option value="marketing">Marketing</option>
+                <option value="project">Project</option>
+              </select>
+            </div>
+
+            <div>
+              <label className={`block text-sm font-medium mb-1 ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                Priority
+              </label>
+              <select
+                value={formData.priority}
+                onChange={(e) => setFormData(prev => ({ ...prev, priority: e.target.value }))}
+                className={`w-full px-3 py-2 rounded-lg border ${
+                  darkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300'
+                } focus:outline-none focus:ring-2 focus:ring-blue-500`}
+              >
+                <option value="high">High</option>
+                <option value="medium">Medium</option>
+                <option value="low">Low</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className={`block text-sm font-medium mb-1 ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                Due Date
+              </label>
+              <input
+                type="datetime-local"
+                value={formData.dueDate}
+                onChange={(e) => setFormData(prev => ({ ...prev, dueDate: e.target.value }))}
+                className={`w-full px-3 py-2 rounded-lg border ${
+                  darkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300'
+                } focus:outline-none focus:ring-2 focus:ring-blue-500`}
+              />
+            </div>
+
+            <div>
+              <label className={`block text-sm font-medium mb-1 ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                Estimated Time
+              </label>
+              <input
+                type="text"
+                value={formData.estimatedTime}
+                onChange={(e) => setFormData(prev => ({ ...prev, estimatedTime: e.target.value }))}
+                className={`w-full px-3 py-2 rounded-lg border ${
+                  darkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300'
+                } focus:outline-none focus:ring-2 focus:ring-blue-500`}
+                placeholder="e.g., 2 hours, 30 minutes"
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center gap-4">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={formData.isProject}
+                onChange={(e) => setFormData(prev => ({ ...prev, isProject: e.target.checked }))}
+                className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500"
+              />
+              <span className={`text-sm ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                This is a project
+              </span>
+            </label>
+
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={formData.reminder}
+                onChange={(e) => setFormData(prev => ({ ...prev, reminder: e.target.checked }))}
+                className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500"
+              />
+              <span className={`text-sm ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                Enable reminder
+              </span>
+            </label>
+          </div>
+
+          <div className="flex gap-3 pt-2">
+            <button
+              type="submit"
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              <Save className="w-4 h-4" />
+              {task ? 'Update Task' : 'Add Task'}
+            </button>
+            <button
+              type="button"
+              onClick={onCancel}
+              className={`px-4 py-2 rounded-lg transition-colors ${
+                darkMode ? 'bg-gray-700 text-gray-300 hover:bg-gray-600' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+              }`}
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      </motion.div>
+    )
+  }
+
   return (
     <div className="space-y-6">
-      {/* Simplified Header */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-4">
           <h2 className={`text-xl font-semibold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
@@ -342,46 +530,13 @@ const TodoList = ({ darkMode, onTaskUpdate, onTaskSelect }) => {
             <span className={`px-2 py-1 rounded-full ${darkMode ? 'bg-green-900/30 text-green-400' : 'bg-green-100 text-green-700'}`}>
               {stats.completed} Completed
             </span>
+            <span className={`px-2 py-1 rounded-full ${darkMode ? 'bg-blue-900/30 text-blue-400' : 'bg-blue-100 text-blue-700'}`}>
+              {stats.projects} Projects
+            </span>
           </div>
-        </div>
-        
-        <div className="flex gap-2">
-          <button
-            onClick={() => setShowSmartSuggestions(!showSmartSuggestions)}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border ${
-              showSmartSuggestions 
-                ? 'bg-purple-100 text-purple-700 border-purple-200' 
-                : 'bg-white text-gray-600 border-gray-300'
-            } transition-colors text-sm`}
-          >
-            <Lightbulb className="w-4 h-4" />
-            {showSmartSuggestions ? 'Hide AI' : 'AI Suggestions'}
-          </button>
         </div>
       </div>
 
-      {/* Smart Suggestions Panel */}
-      <AnimatePresence>
-        {showSmartSuggestions && (
-          <motion.div
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            className="mb-6"
-          >
-            <SmartSuggestions
-              darkMode={darkMode} 
-              onAddTask={(newTask) => {
-                setTodos(prev => [newTask, ...prev])
-                setShowSmartSuggestions(false)
-              }}
-              onClose={() => setShowSmartSuggestions(false)}
-            />
-          </motion.div>
-        )}
-      </AnimatePresence>
-      
-      {/* View Toggle */}
       <div className="flex justify-between items-center">
         <div className="flex gap-2">
           <button
@@ -414,15 +569,9 @@ const TodoList = ({ darkMode, onTaskUpdate, onTaskSelect }) => {
           }`}>
             Total: {stats.total}
           </span>
-          <span className={`px-3 py-1.5 rounded-lg text-sm ${
-            darkMode ? 'bg-blue-900/30 text-blue-400' : 'bg-blue-100 text-blue-700'
-          }`}>
-            In Progress: {stats.inProgress}
-          </span>
         </div>
       </div>
 
-      {/* Add Task Button */}
       <div className="flex justify-between items-center">
         <button
           onClick={() => setShowAddForm(true)}
@@ -433,7 +582,6 @@ const TodoList = ({ darkMode, onTaskUpdate, onTaskSelect }) => {
         </button>
       </div>
 
-      {/* Filters */}
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="flex-1 relative">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -457,82 +605,45 @@ const TodoList = ({ darkMode, onTaskUpdate, onTaskSelect }) => {
         >
           <option value="all">All Tasks</option>
           <option value="pending">Pending</option>
-          <option value="in_progress">In Progress</option>
           <option value="completed">Completed</option>
           <option value="high">High Priority</option>
-          <option value="medium">Medium Priority</option>
-          <option value="low">Low Priority</option>
-        </select>
-        
-        <select
-          value={sortBy}
-          onChange={(e) => setSortBy(e.target.value)}
-          className={`px-3 py-2 rounded-lg border text-sm ${
-            darkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300'
-          } focus:outline-none focus:ring-2 focus:ring-blue-500`}
-        >
-          <option value="priority">Sort by Priority</option>
-          <option value="dueDate">Sort by Due Date</option>
         </select>
       </div>
 
-      {/* Todo Form */}
       <AnimatePresence>
-        {showAddForm && (
+        {(showAddForm || editingTask) && (
           <motion.div
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
             className="mb-6"
           >
-            <TodoForm
-              darkMode={darkMode}
-              onSave={(newTask) => {
-                const updatedTodos = [...todos, newTask]
-                saveTodos(updatedTodos)
+            <TaskForm
+              task={editingTask}
+              onSave={editingTask ? updateTask : addTask}
+              onCancel={() => {
                 setShowAddForm(false)
-              }}
-              onCancel={() => setShowAddForm(false)}
-            />
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Todo Form for Editing */}
-      <AnimatePresence>
-        {editingTask && (
-          <motion.div
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            className="mb-6"
-          >
-            <TodoForm
-              darkMode={darkMode}
-              initialData={editingTask}
-              onSave={(updatedTask) => {
-                const updatedTodos = todos.map(todo => 
-                  todo.id === updatedTask.id ? updatedTask : todo
-                )
-                saveTodos(updatedTodos)
                 setEditingTask(null)
               }}
-              onCancel={() => setEditingTask(null)}
             />
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Todo List - Hierarchical Design */}
-      {viewMode === 'list' && (
-        <div className="space-y-2">
+      <div className="space-y-2">
+        <AnimatePresence>
           {filteredAndSortedTodos.length === 0 ? (
-            <div className="text-center py-8">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="text-center py-8"
+            >
               <List className="w-12 h-12 text-gray-300 mx-auto mb-2" />
               <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
                 {searchTerm || filter !== 'all' ? 'No tasks match your filters' : 'No tasks yet. Start adding some!'}
               </p>
-            </div>
+            </motion.div>
           ) : (
             filteredAndSortedTodos.map((todo, index) => {
               const subTasks = getSubTasks(todo.id)
@@ -542,7 +653,6 @@ const TodoList = ({ darkMode, onTaskUpdate, onTaskSelect }) => {
                 <React.Fragment key={todo.id}>
                   {renderTask(todo, index, false)}
                   
-                  {/* Render sub-tasks if project is expanded */}
                   {todo.isProject && isExpanded && subTasks.length > 0 && (
                     <div className="space-y-2 mt-2">
                       {subTasks.map((subTask, subIndex) => (
@@ -554,26 +664,10 @@ const TodoList = ({ darkMode, onTaskUpdate, onTaskSelect }) => {
               )
             })
           )}
-        </div>
-      )}
-
-      {/* Calendar View */}
-      {viewMode === 'calendar' && (
-        <div className="space-y-4">
-          <Calendar
-            darkMode={darkMode}
-            todos={todos}
-            onTaskUpdate={(updatedTodos) => {
-              setTodos(updatedTodos)
-              localStorage.setItem('pg-todos', JSON.stringify(updatedTodos))
-              onTaskUpdate && onTaskUpdate(updatedTodos)
-            }}
-            onTaskSelect={onTaskSelect}
-          />
-        </div>
-      )}
+        </AnimatePresence>
+      </div>
     </div>
   )
 }
 
-export default TodoList
+export default TodoListEnhanced
