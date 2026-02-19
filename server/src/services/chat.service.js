@@ -266,17 +266,13 @@ const extractWithRegex = (message, currentContext = {}, lastAskedField = null) =
 // ═══════════════════════════════════════════════════════════════
 
 const extractBookingDetails = async (message, context = {}, lastAskedField = null) => {
-  console.log('🔍 Extracting booking details... lastAskedField:', lastAskedField)
-
   // Try AI first
   const aiResult = await aiService.extractBookingDetailsAI(message, context)
   if (aiResult.success && aiResult.data) {
-    console.log('✅ AI extraction successful')
     return { ...aiResult.data, extractionMethod: 'ai' }
   }
 
   // AI failed → regex fallback
-  console.log(`⚠️ AI failed (${aiResult.error}), using regex fallback`)
   const regexResult = extractWithRegex(message, context, lastAskedField)
 
   // Smart context: if we asked for a specific field and regex didn't get it,
@@ -289,7 +285,6 @@ const extractBookingDetails = async (message, context = {}, lastAskedField = nul
           !/^(book|yes|no|ok|cancel|wedding|portrait|hi|hello|\d|start|view|contact|help|change|✅|❌)/i.test(cleanMsg)) {
           regexResult.name = cleanMsg.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ')
           regexResult.confidence = 0.75
-          console.log('   → Context-assumed name:', regexResult.name)
         }
         break
       case 'phone': {
@@ -297,7 +292,6 @@ const extractBookingDetails = async (message, context = {}, lastAskedField = nul
         if (/^[6-9]\d{9}$/.test(digits)) {
           regexResult.phone = digits
           regexResult.confidence = 0.9
-          console.log('   → Context-extracted phone:', regexResult.phone)
         }
         break
       }
@@ -308,13 +302,11 @@ const extractBookingDetails = async (message, context = {}, lastAskedField = nul
         if (qKey) {
           regexResult.package = qKey
           regexResult.confidence = 0.95
-          console.log('   → Context-matched package:', qKey)
         } else {
           for (const [pkgType, keywords] of Object.entries(PACKAGE_KEYWORDS)) {
             if (keywords.some(k => word.includes(k) || k.includes(word))) {
               regexResult.package = pkgType
               regexResult.confidence = 0.8
-              console.log('   → Context-matched package:', pkgType)
               break
             }
           }
@@ -332,7 +324,6 @@ const extractBookingDetails = async (message, context = {}, lastAskedField = nul
             regexResult.date = d.toISOString().split('T')[0]
             regexResult.date_formatted = d.toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
             regexResult.confidence = 0.7
-            console.log('   → Context-assumed date:', regexResult.date_formatted)
           }
         }
         break
@@ -346,7 +337,6 @@ const extractBookingDetails = async (message, context = {}, lastAskedField = nul
             regexResult.time = `${h.toString().padStart(2, '0')}:00`
             regexResult.time_formatted = formatted
             regexResult.confidence = 0.7
-            console.log('   → Context-assumed time:', formatted)
           }
         }
         break
@@ -386,8 +376,6 @@ const handleBookingFlow = async (conversation, message, detectedLanguage) => {
     current_date: ctx.date?.raw,
     current_time: ctx.time?.raw
   }, ctx.lastAskedField)
-
-  console.log('📦 Extracted:', JSON.stringify(extractedData, null, 2))
 
   // ── HANDLE CANCELLATION ──
   if (extractedData.intent === 'cancel') {
@@ -520,8 +508,6 @@ const handleBookingFlow = async (conversation, message, detectedLanguage) => {
   if (!ctx.time?.formatted) missingFields.push('time')
   if (!ctx.name) missingFields.push('name')
   if (!ctx.phone) missingFields.push('phone')
-
-  console.log('📋 Missing fields:', missingFields)
 
   // All fields collected → show confirmation
   if (missingFields.length === 0) {
@@ -868,10 +854,6 @@ const generateResponse = (intent, language = 'en') => {
  */
 export const processMessage = async (sessionId, message, metadata = {}) => {
   try {
-    console.log('\n════════════════════════════════════════')
-    console.log(`📨 Session: ${sessionId}`)
-    console.log(`💬 Message: "${message}"`)
-    console.log('════════════════════════════════════════')
 
     // Find or create conversation
     let conversation = await Conversation.findOne({ sessionId })
@@ -882,7 +864,6 @@ export const processMessage = async (sessionId, message, metadata = {}) => {
         messages: [],
         meta: { platform: metadata.platform || 'web' }
       })
-      console.log('📝 Created new conversation')
     }
 
     const detectedLanguage = detectLanguage(message)
@@ -901,7 +882,6 @@ export const processMessage = async (sessionId, message, metadata = {}) => {
     ].includes(ctx.state)
 
     const intentData = detectIntent(message)
-    console.log('🎯 Intent:', intentData, '| In booking flow:', isInBookingFlow)
 
     let response
 
@@ -917,17 +897,14 @@ export const processMessage = async (sessionId, message, metadata = {}) => {
         conversation.visitor.name = extractedName
         conversation.markModified('visitor')
         await conversation.save()
-        console.log('👤 Extracted name from first message:', extractedName)
       }
     }
 
     if (isInBookingFlow) {
       // ACTIVELY in booking → route ALL messages through booking handler
-      console.log('📌 Continuing booking flow (state:', ctx.state, ')')
       response = await handleBookingFlow(conversation, message, detectedLanguage)
     }
     else if (intentData.intent === 'booking' || intentData.detectedPackage) {
-      console.log('📌 Starting new booking flow...')
       conversation.bookingContext = {
         state: BOOKING_STATES.STARTED,
         startedAt: new Date(),
@@ -952,12 +929,10 @@ export const processMessage = async (sessionId, message, metadata = {}) => {
       response = await handleBookingFlow(conversation, message, detectedLanguage)
     }
     else if (intentData.intent && intentData.confidence > 0.8) {
-      console.log('📌 Handling intent:', intentData.intent)
       response = generateResponse(intentData.intent, detectedLanguage)
     }
     else {
       // Try AI for general chat
-      console.log('📌 Using AI for general response...')
       try {
         const aiResult = await aiService.getChatResponse(message, {
           language: detectedLanguage,
@@ -998,9 +973,6 @@ export const processMessage = async (sessionId, message, metadata = {}) => {
     conversation.markModified('messages')
     conversation.markModified('meta')
     await conversation.save()
-
-    console.log('✅ Response:', response.text.substring(0, 100) + '...')
-    console.log('════════════════════════════════════════\n')
 
     return { response, sessionId, language: detectedLanguage, aiStatus: getAIStatus() }
 
@@ -1126,7 +1098,6 @@ export const getConversation = async (sessionId) => {
  */
 export const runLearningJob = async () => {
   try {
-    console.log('🎓 Running learning job...')
     return { success: true, approvedCount: 0, message: 'Learning job completed' }
   } catch (error) {
     console.error('❌ Learning job error:', error)

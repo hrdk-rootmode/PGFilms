@@ -45,26 +45,16 @@ const PackageManagement = ({ darkMode = false, adminAPI }) => {
   const fetchPackages = async () => {
     try {
       setLoading(true)
-      console.log('Fetching packages from admin API...')
       
       const response = await adminAPI.getAdminPackages()
-      console.log('Admin API response:', response)
       
       const packagesData = response.data?.data || []
-      console.log('Packages data received:', packagesData.length)
-      console.log('Package details:', packagesData.map(p => ({
-        id: p.id,
-        name: p.name,
-        isActive: p.isActive,
-        popular: p.popular
-      })))
       
       setPackages(packagesData)
       
       // Log active/inactive counts
       const activeCount = packagesData.filter(p => p.isActive !== false).length
       const inactiveCount = packagesData.filter(p => p.isActive === false).length
-      console.log(`Package status: ${activeCount} active, ${inactiveCount} inactive`)
       
     } catch (error) {
       console.error('Failed to fetch packages:', error)
@@ -77,10 +67,8 @@ const PackageManagement = ({ darkMode = false, adminAPI }) => {
   const handleCreatePackage = async () => {
     try {
       setLoading(true)
-      console.log('Creating new package:', newPackage)
       
       const response = await adminAPI.createPackage(newPackage)
-      console.log('Create response:', response)
       
       await fetchPackages()
       setShowAddModal(false)
@@ -106,37 +94,25 @@ const PackageManagement = ({ darkMode = false, adminAPI }) => {
   const handleUpdatePackage = async (packageId, data) => {
     try {
       setLoading(true)
-      console.log('🔧 PackageManagement - Updating package:', packageId, data)
       
       // Call the admin API to update the package
       const response = await adminAPI.updatePackage(packageId, data)
-      console.log('🔧 PackageManagement - Update response:', response)
       
       // Wait a moment for database to settle
       await new Promise(resolve => setTimeout(resolve, 500))
       
       // Refresh packages to get the latest data
-      console.log('🔄 PackageManagement - Refreshing packages after update...')
       await fetchPackages()
       
       // Verify the package was updated correctly
       const updatedPackage = packages.find(p => p.id === packageId)
       if (updatedPackage) {
-        console.log('✅ PackageManagement - Package updated successfully:', {
-          id: updatedPackage.id,
-          name: updatedPackage.name,
-          isActive: updatedPackage.isActive,
-          popular: updatedPackage.popular
-        })
         showSuccessMessage('Package updated successfully! Changes are now live on the homepage.')
       } else {
-        console.warn('⚠️ PackageManagement - Package not found after refresh, forcing refresh...')
-        // Force another refresh if package not found
         await fetchPackages()
         showSuccessMessage('Package updated! Refreshing homepage...')
       }
     } catch (error) {
-      console.error('❌ PackageManagement - Failed to update package:', error)
       showSuccessMessage('Failed to update package. Please try again.')
     } finally {
       setLoading(false)
@@ -147,11 +123,9 @@ const PackageManagement = ({ darkMode = false, adminAPI }) => {
     if (window.confirm('Are you sure you want to delete this package? This action cannot be undone.')) {
       try {
         setLoading(true)
-        console.log('Deleting package:', packageId)
         
         // Call the admin API to delete the package
         await adminAPI.deletePackage(packageId)
-        console.log('Package deleted successfully')
         
         // Refresh packages to get the latest data
         await fetchPackages()

@@ -113,10 +113,8 @@ const generalLimiter = rateLimit({
 })
 
 cron.schedule('0 8 * * *', async () => {
-  console.log('📧 Sending daily briefing email...')
   try {
     await sendDailyBriefingEmail()
-    console.log('✅ Daily briefing email sent')
   } catch (error) {
     console.error('❌ Daily briefing email failed:', error.message)
   }
@@ -126,20 +124,16 @@ cron.schedule('0 8 * * *', async () => {
 
 // Weekly summary - Monday 9:00 AM
 cron.schedule('0 9 * * 1', async () => {
-  console.log('📧 Sending weekly summary email...')
   try {
     // Import function when needed
     const { sendWeeklySummaryEmail } = await import('./services/email.service.js')
     await sendWeeklySummaryEmail()
-    console.log('✅ Weekly summary email sent')
   } catch (error) {
     console.error('❌ Weekly summary email failed:', error.message)
   }
 }, {
   timezone: process.env.TIMEZONE || 'Asia/Kolkata'
 })
-
-console.log('⏰ Automation cron jobs scheduled')
 
 // Rate limiting - Chat (more lenient)
 const chatLimiter = rateLimit({
@@ -395,8 +389,6 @@ const connectDB = async () => {
       // But keeping for compatibility
     })
 
-    console.log(`✅ MongoDB Connected: ${conn.connection.host}`)
-
     // Initialize default data if needed
     await initializeDefaultData()
 
@@ -415,13 +407,11 @@ const initializeDefaultData = async () => {
     const adminExists = await Config.findOne({ _id: 'admin' })
 
     if (!adminExists) {
-      console.log('📦 Initializing default data...')
 
       // Import and run seed function
       const { seedDatabase } = await import('./utils/helpers.js')
       await seedDatabase()
 
-      console.log('✅ Default data initialized')
     }
   } catch (error) {
     console.error('⚠️ Error initializing default data:', error.message)
@@ -435,10 +425,8 @@ const initializeDefaultData = async () => {
 const setupCronJobs = () => {
   // Daily cleanup - Run at midnight
   cron.schedule('0 0 * * *', async () => {
-    console.log('🧹 Running daily cleanup job...')
     try {
       await runDailyCleanup()
-      console.log('✅ Daily cleanup completed')
     } catch (error) {
       console.error('❌ Daily cleanup failed:', error.message)
     }
@@ -448,10 +436,8 @@ const setupCronJobs = () => {
 
   // Analytics aggregation - Run every hour
   cron.schedule('0 * * * *', async () => {
-    console.log('📊 Running analytics aggregation...')
     try {
       await runAnalyticsAggregation()
-      console.log('✅ Analytics aggregation completed')
     } catch (error) {
       console.error('❌ Analytics aggregation failed:', error.message)
     }
@@ -459,16 +445,13 @@ const setupCronJobs = () => {
 
   // Learning job - Run every 6 hours
   cron.schedule('0 */6 * * *', async () => {
-    console.log('🧠 Running learning job...')
     try {
       await runLearningJob()
-      console.log('✅ Learning job completed')
     } catch (error) {
       console.error('❌ Learning job failed:', error.message)
     }
   })
 
-  console.log('⏰ Cron jobs scheduled')
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -485,22 +468,7 @@ const startServer = async () => {
 
     // Start listening
     app.listen(PORT, () => {
-      console.log(`
-╔═══════════════════════════════════════════════════════════════╗
-║                                                               ║
-║   🎬 PG FILMMAKER API SERVER                                  ║
-║                                                               ║
-║   Status:      Running                                        ║
-║   Port:        ${PORT}                                            ║
-║   Environment: ${process.env.NODE_ENV || 'development'}                               ║
-║   Database:    Connected                                      ║
-║                                                               ║
-║   Endpoints:                                                  ║
-║   • Health:    http://localhost:${PORT}/health                    ║
-║   • API:       http://localhost:${PORT}/api                       ║
-║                                                               ║
-╚═══════════════════════════════════════════════════════════════╝
-      `)
+      // Server started successfully
     })
   } catch (error) {
     console.error('❌ Failed to start server:', error)

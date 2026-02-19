@@ -280,41 +280,16 @@ const PackagesSection = () => {
   const fetchPackages = async () => {
     try {
       const response = await publicAPI.getPackages()
-      console.log('🏠 Home Page - Raw API response:', response)
-      console.log('🏠 Home Page - Response data:', response.data)
       
       // The API returns { success: true, data: [...] }
       const allPackages = response.data.data || []
-      console.log('🏠 Home Page - All packages received:', allPackages.length)
-      console.log('🏠 Home Page - Package details:', allPackages.map(p => ({ 
-        id: p.id, 
-        name: p.name, 
-        price: p.price,
-        isActive: p.isActive,
-        popular: p.popular 
-      })))
-      
       const activePackages = allPackages.filter(pkg => pkg.isActive !== false)
-      console.log('🏠 Home Page - Active packages after filtering:', activePackages.length)
-      console.log('🏠 Home Page - Active package details:', activePackages.map(p => ({ 
-        id: p.id, 
-        name: p.name, 
-        price: p.price,
-        isActive: p.isActive 
-      })))
       
       // Check specifically for 25k packages
       const packages25k = allPackages.filter(p => {
         const price = parseInt(String(p.price || '0').replace(/[^\d]/g, '') || 0)
         return price >= 20000 && price <= 30000
       })
-      console.log('🏠 Home Page - 20k-30k packages found:', packages25k.length)
-      console.log('🏠 Home Page - 20k-30k package details:', packages25k.map(p => ({
-        id: p.id,
-        name: p.name,
-        price: p.price,
-        isActive: p.isActive
-      })))
       
       setPackages(allPackages)
     } catch (error) {
@@ -328,13 +303,11 @@ const PackagesSection = () => {
 
   const handleRefresh = () => {
     setRefreshing(true)
-    console.log('🔄 Home Page - Manual refresh triggered')
     fetchPackages()
   }
 
   // Add a function to force refresh from external events
   const forceRefresh = () => {
-    console.log('🔄 Home Page - Force refresh triggered')
     setRefreshing(true)
     fetchPackages()
   }
